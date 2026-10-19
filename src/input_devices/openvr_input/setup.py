@@ -22,7 +22,6 @@ setup(
     maintainer_email='wuji@example.com',
     description='ROS2 input device for OpenVR Trackers (HTC Vive Trackers)',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'openvr_input = openvr_input.openvr_input_node:main',

@@ -32,7 +32,7 @@ class ROS2LoggerAdapter:
     and then forwards to the ROS2 logger.
 
     Mirrors the equivalent implementation in
-    input_devices/pico_input/pico_input/ros2_logging.py.
+    the Python control libraries.
     """
 
     def __init__(self, ros_logger):

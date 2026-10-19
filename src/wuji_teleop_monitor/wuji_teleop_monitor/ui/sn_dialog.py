@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Scan-SN dialog: enumerate Wuji Hand (USB) + Wuji Glove (SDK) and write
-their serial numbers back to wujihand_ik.yaml / wuji_glove.yaml.
-
-Scanners degrade gracefully when their backends are missing (lsusb, wuji_sdk,
-ruamel.yaml) so the Monitor stays usable on hosts without them.
-"""
+"""Scan Wuji Hand USB serial numbers and update local hardware YAML."""
 
 from __future__ import annotations
 
@@ -53,14 +48,7 @@ _DIALOG_DARK_CSS = """
 
 
 def _resolve_config_path(pkg_name: str, filename: str) -> Optional[Path]:
-    """Resolve a package config file via ament_index.
-
-    Single-path lookup matching wuji_teleop_bringup.launch_utils: the live
-    `<filename>` is seeded from `<filename>.template` by docker/entrypoint.sh
-    on container start, so launch helpers and Scan SNs read/write the same
-    file. Returns the canonical (symlink-resolved) path so writes land in the
-    bind-mounted source tree, not the install/share symlink chain.
-    """
+    """Resolve the source YAML through the colcon install symlink."""
     try:
         cand = Path(get_package_share_directory(pkg_name)) / "config" / filename
     except Exception:
@@ -68,32 +56,9 @@ def _resolve_config_path(pkg_name: str, filename: str) -> Optional[Path]:
     return cand.resolve() if cand.exists() else None
 
 
-# Container bind-mount: docker-compose.yml maps host `<repo>/public/src` →
-# container `/home/wuji/ros2_ws/src`. Splitting on this prefix lets us show
-# the equivalent host path so operators editing on the host (where the UI
-# pixels render via X11) know which file actually changes on disk.
-_CONTAINER_SRC_PREFIX = "/home/wuji/ros2_ws/src/"
-
-
 def _format_path_lines(path: Path) -> List[str]:
-    """Render a YAML path as one or two friendly lines.
+    return [str(path)]
 
-    If the path lives under the container's bind-mounted `src/` tree, emit:
-      Container: /home/wuji/ros2_ws/src/<rest>
-      Host:      <repo>/public/src/<rest>   (Docker bind-mount)
-    Otherwise just return the absolute path.
-    """
-    s = str(path)
-    if s.startswith(_CONTAINER_SRC_PREFIX):
-        rest = s[len(_CONTAINER_SRC_PREFIX):]
-        return [
-            f"Container: {_CONTAINER_SRC_PREFIX}{rest}",
-            f"Host:      &lt;repo&gt;/public/src/{rest}   (Docker bind-mount)",
-        ]
-    return [s]
-
-
-# -------------------- YAML helpers --------------------
 
 def _load_yaml(path: Path, log: LogCallback):
     """Load YAML preserving comments + ordering when ruamel.yaml is available."""
@@ -201,82 +166,8 @@ class WujiHandScanner:
         return devices
 
 
-class WujiGloveScanner:
-    """Wuji Glove SNs via `wuji_sdk.SdkManager.instance().scan()`."""
-
-    @classmethod
-    def is_sdk_available(cls) -> bool:
-        try:
-            import wuji_sdk  # noqa: F401
-            return True
-        except ImportError:
-            return False
-
-    @classmethod
-    def scan(cls, log: LogCallback) -> List[dict]:
-        if not cls.is_sdk_available():
-            log("Wuji SDK unavailable - install via pip in container")
-            return []
-        try:
-            from wuji_sdk import SdkManager
-            devices = SdkManager.instance().scan()
-        except Exception as e:
-            log(f"Wuji Glove scan failed: {e}")
-            return []
-
-        results: List[dict] = []
-        zenoh_skipped = 0
-        for d in devices:
-            sn = getattr(d, "sn", "") or ""
-            address = getattr(d, "address", "") or ""
-            transport = str(getattr(d, "transport_type", "") or "")
-            if not sn:
-                continue
-            # Drop Zenoh-discovered entries — those are gloves visible on the
-            # LAN via the SDK's bridge, which can include other operators'
-            # hardware. Save-to-YAML only ever wants the directly-attached
-            # UDP gloves on this operator's harness.
-            if "udp" not in transport.lower():
-                zenoh_skipped += 1
-                continue
-            results.append({
-                "sn": sn,
-                "address": address,
-                "transport": transport,
-            })
-        if zenoh_skipped:
-            log(f"[scan] Wuji Glove: {len(results)} UDP, "
-                f"skipped {zenoh_skipped} via Zenoh")
-        return results
-
-
-# -------------------- Side auto-detection --------------------
-
-# Wuji Glove convention: factory configures the left glove with the
-# .100 IP and the right glove with .101 on the operator's harness LAN.
-# Override only if a deployment uses different IPs.
-_GLOVE_LEFT_OCTET = 100
-_GLOVE_RIGHT_OCTET = 101
-_IP_LAST_OCTET_RE = re.compile(r"\.(\d+)(?::|$)")
-
-
 def _suggest_side(device: dict, kind: str) -> Optional[str]:
-    """Return 'left' / 'right' / None for a detected device.
-
-    Heuristics:
-      - Wuji Glove: last octet of IP (`192.168.1.100` -> left, `.101` -> right).
-      - Wuji Hand: current-gen SNs carry no L/R marker; next-gen reportedly
-        will. Return None until that format is documented.
-    """
-    if kind == "glove":
-        addr = device.get("address") or ""
-        m = _IP_LAST_OCTET_RE.search(addr)
-        if m:
-            octet = int(m.group(1))
-            if octet == _GLOVE_LEFT_OCTET:
-                return "left"
-            if octet == _GLOVE_RIGHT_OCTET:
-                return "right"
+    # Hand serials do not encode handedness; let the operator bind each hand.
     return None
 
 
@@ -399,13 +290,13 @@ class ScanSNDialog(QDialog):
     """Modal dialog: run both scanners in a background thread, then show
     per-device Save-as-left / Save-as-right buttons."""
 
-    _results_signal = pyqtSignal(list, list)
+    _results_signal = pyqtSignal(list)
 
     def __init__(self, parent=None, log_callback: Optional[LogCallback] = None):
         super().__init__(parent)
         self._log = log_callback or (lambda _msg: None)
         self.setWindowTitle("Scan device SNs")
-        # Portrait, wide enough for "Container: /home/wuji/ros2_ws/src/..."
+        # Portrait, wide enough for absolute local configuration
         # paths to render on one line, tall enough that 6 detected devices +
         # save buttons fit without scrolling on a 1080p display. Scroll area
         # absorbs anything beyond.
@@ -416,7 +307,7 @@ class ScanSNDialog(QDialog):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(10, 10, 10, 10)
         self._layout.setSpacing(8)
-        self._status = QLabel("Scanning Wuji Hand (USB) and Wuji Glove (SDK)...")
+        self._status = QLabel("Scanning Wuji Hand (USB)...")
         self._layout.addWidget(self._status)
 
         # Scrollable inner area — keeps the dialog at a sane proportion even
@@ -482,7 +373,7 @@ class ScanSNDialog(QDialog):
         QTimer.singleShot(60, self._start_scan)
 
     def _start_scan(self) -> None:
-        self._status.setText("Scanning Wuji Hand (USB) and Wuji Glove (SDK)...")
+        self._status.setText("Scanning Wuji Hand (USB)...")
         self._rescan_btn.setEnabled(False)
         self._clear_results()
         self._install_loading_widget()
@@ -532,8 +423,7 @@ class ScanSNDialog(QDialog):
 
     def _scan_worker(self) -> None:
         hands = WujiHandScanner.scan(self._log)
-        gloves = WujiGloveScanner.scan(self._log)
-        self._results_signal.emit(hands, gloves)
+        self._results_signal.emit(hands)
 
     def _clear_results(self) -> None:
         while self._results_host_layout.count():
@@ -544,24 +434,20 @@ class ScanSNDialog(QDialog):
         self._loading_widget = None
         self._loading_label = None
 
-    def _on_results(self, hands: list, gloves: list) -> None:
+    def _on_results(self, hands: list) -> None:
         self._loading_timer.stop()
         QApplication.restoreOverrideCursor()
         self._clear_results()
 
         self._status.setText(
-            f"Found {len(hands)} Wuji Hand(s), {len(gloves)} Wuji Glove(s).")
+            f"Found {len(hands)} Wuji Hand(s).")
         self._rescan_btn.setEnabled(True)
 
         hand_yaml = _resolve_config_path("wujihand_output", "wujihand_ik.yaml")
-        glove_yaml = _resolve_config_path("wuji_glove", "wuji_glove.yaml")
 
         self._results_host_layout.addWidget(self._build_group(
             "Wuji Hand", hands, hand_yaml, "hand",
             left_key="left_hand", right_key="right_hand"))
-        self._results_host_layout.addWidget(self._build_group(
-            "Wuji Glove", gloves, glove_yaml, "glove",
-            left_key="left_glove", right_key="right_glove"))
 
     _SECTION_CSS = "color: #888; font-size: 9px; font-weight: bold; letter-spacing: 1px;"
     _BODY_CSS = "color: #ddd; font-size: 10px;"
@@ -587,12 +473,12 @@ class ScanSNDialog(QDialog):
             v.addWidget(err)
             return box
 
-        # Section 1 — TARGET (file name big-ish, container + host paths small).
+        # Section 1 — TARGET (file name big-ish, local paths small).
         v.addWidget(self._section_header("Target"))
         name_lbl = QLabel(f"   {yaml_path.name}")
         name_lbl.setStyleSheet(self._BODY_CSS)
         v.addWidget(name_lbl)
-        # Render path lines individually so the mono "Container:" / "Host:" key
+        # Render path lines individually so the local file path
         # column lines up vertically when both lines are present.
         for path_line in _format_path_lines(yaml_path):
             line_lbl = QLabel(f"   {path_line}")

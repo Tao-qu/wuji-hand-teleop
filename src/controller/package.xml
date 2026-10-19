@@ -7,8 +7,6 @@
   <maintainer email="dev@wuji.com">Wuji Robotics</maintainer>
   <license>MIT</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
@@ -21,10 +19,6 @@
   <!-- Hardware-interface dependencies -->
   <exec_depend>tianji_output</exec_depend>
   <exec_depend>wujihand_output</exec_depend>
-  <exec_depend>wuji_retargeting</exec_depend>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

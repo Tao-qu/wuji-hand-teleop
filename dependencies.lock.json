@@ -1,0 +1,12 @@
+{
+  "wujihandros2": {
+    "url": "https://github.com/wuji-technology/wujihandros2.git",
+    "commit": "0dc2fd780e895a836ce5974dd3864c0678e0ee52",
+    "submodule": "external/wuji-description"
+  },
+  "wuji-retargeting": {
+    "url": "https://github.com/wuji-technology/wuji-retargeting.git",
+    "commit": "c8d118b3579dcb5ef8cb746fb8644f0aa0a071f9",
+    "submodule": "wuji_retargeting/wuji-description"
+  }
+}

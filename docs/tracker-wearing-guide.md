@@ -2,7 +2,7 @@
 
 ## Getting Started
 
-Before wearing the Trackers, pair them with SteamVR and confirm their serial numbers. After assigning each Tracker to a body segment, write the serial mapping into the configuration file [`openvr_input.yaml`](https://github.com/wuji-technology/wuji-hand-teleop/blob/main/src/input_devices/openvr_input/config/openvr_input.yaml) in the wuji-hand-teleop project.
+Before wearing the Trackers, pair them with SteamVR and confirm their serial numbers. After assigning each Tracker to a body segment, write the serial mapping into the configuration file [`openvr_input.yaml`](../src/input_devices/openvr_input/config/openvr_input.yaml.template) in the wuji-hand-teleop project.
 
 ```yaml
 tracker_serials:
@@ -14,7 +14,7 @@ tracker_serials:
 ```
 
 > [!NOTE]
-> SteamVR supports pairing Tracker in headset-free mode by configuring the Null Driver. For setup instructions, see [Configure Null Driver (Headset-Free Mode)](https://github.com/wuji-technology/wuji-hand-teleop/blob/main/docs/STEAMVR.md#2-configure-null-driver-headset-free-mode). For full usage instructions of wuji-hand-teleop, see [`README.md`](https://github.com/wuji-technology/wuji-hand-teleop).
+> SteamVR supports pairing Tracker in headset-free mode by configuring the Null Driver. For setup instructions, see [Configure Null Driver (Headset-Free Mode)](STEAMVR.md). For full usage instructions of wuji-hand-teleop, see [`README.md`](../README.md).
 
 ## Wear the Tracker
 

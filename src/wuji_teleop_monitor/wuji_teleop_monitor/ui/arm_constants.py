@@ -5,7 +5,7 @@ Source: Tianji SDK documentation
 https://github.com/cynthia-you/TJ_FX_ROBOT_CONTRL_SDK/blob/master/README.md
 """
 
-# Init joints reference (from tianji_chest.yaml / tianji_world.yaml)
+# Init joints reference (from tianji_chest.yaml)
 INIT_LEFT = [55.0, -65.0, -70.0, -60.0, 60.0, 0.0, 0.0]
 INIT_RIGHT = [-55.0, -65.0, 70.0, -60.0, -60.0, 0.0, 0.0]
 

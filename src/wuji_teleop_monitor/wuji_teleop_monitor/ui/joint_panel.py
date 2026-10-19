@@ -66,6 +66,22 @@ class JointDisplayPanel(QGroupBox):
         self._render_timer.timeout.connect(self._refresh_display)
         self._render_timer.start(self.RENDER_INTERVAL_MS)
 
+    def set_mode(self, hands=True, arms=True):
+        """Show only the selected robot chains."""
+        def visible(item, show):
+            if item.widget():
+                item.widget().setVisible(show)
+            elif item.layout():
+                for index in range(item.layout().count()):
+                    visible(item.layout().itemAt(index), show)
+        layout = self.layout()
+        for index in (0, 1, 2, 7, 8):
+            if index < layout.count():
+                visible(layout.itemAt(index), arms)
+        for index in (3, 4, 5):
+            visible(layout.itemAt(index), hands)
+        self.setTitle("Joint Angles")
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(4)

@@ -1,14 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""QoS auto-match utility — shared logic lifted from the recorder ros_node.
-
-All UI subscribers should call match_publisher_qos() instead of hard-coding
-BEST_EFFORT, so the subscription QoS adapts to the publisher's policy:
-- D405 wrist cameras (RELIABLE) → subscribe RELIABLE for zero dropped frames
-- Head camera (RELIABLE) → ditto
-- joint_states and similar (BEST_EFFORT) → subscribe BEST_EFFORT for low latency
-"""
-
+"""Match joint-state subscription QoS to the active publisher."""
 from rclpy.node import Node
 from rclpy.qos import (
     QoSProfile,

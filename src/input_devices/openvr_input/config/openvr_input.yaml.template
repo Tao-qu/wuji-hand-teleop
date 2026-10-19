@@ -4,7 +4,6 @@
 # Tracker serial numbers
 # Run the following command to get your tracker serial numbers:
 #   python3 -c "import openvr; openvr.init(openvr.VRApplication_Other); vr=openvr.VRSystem(); [print(f'{i}: {vr.getStringTrackedDeviceProperty(i, openvr.Prop_SerialNumber_String)}') for i in range(64) if vr.getTrackedDeviceClass(i)==openvr.TrackedDeviceClass_GenericTracker]; openvr.shutdown()"
-# Or use the list_trackers.py script from teleop-wujihand-arm project
 tracker_serials:
   chest: "LHR-XXXXXXXX"        # Chest
   right_wrist: "LHR-XXXXXXXX"  # Right wrist
@@ -12,7 +11,6 @@ tracker_serials:
   left_arm:  "LHR-XXXXXXXX"    # Left upper arm
   right_arm:   "LHR-XXXXXXXX"   # Right upper arm
 
-  # head: "LHR-XXXXXXXX"           # Head
 
 # Wrist tracker offset in tracker's local frame [x, y, z] (meters)
 # This offset is applied BEFORE coordinate correction to map tracker position to actual wrist
@@ -29,7 +27,3 @@ publish_rate_hz: 120.0
 # TF settings
 publish_tf: true
 parent_frame: "world"
-
-# Chest to head offset (meters)
-# The chest tracker is worn at chest level, we need to add 0.3m to get head position
-chest_to_head_offset_z: 0.3

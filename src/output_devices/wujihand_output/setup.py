@@ -25,7 +25,6 @@ setup(
     maintainer_email='your_email@example.com',
     description='Wuji hand hardware interface library — provides the WujiHandController control interface',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
         ],

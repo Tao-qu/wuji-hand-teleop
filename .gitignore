@@ -14,7 +14,6 @@ __pycache__/
 # tianji_output: fx_kine.py / fx_robot.py load from _internal/lib/ (not lib/).
 !src/output_devices/tianji_output/tianji_output/_internal/lib/*.so
 !**/ManusSDK/lib/*.so
-!src/input_devices/pico_input/prebuilt/**/*.so
 .Python
 *.egg-info/
 dist/
@@ -44,18 +43,15 @@ ENV/
 # Repo tracks `<file>.yaml.template` only. Operator copies the template
 # to `<file>.yaml`, fills real values, and the live file stays out of git.
 # Launch helpers + Scan SNs UI both read the single `<file>.yaml` path.
-# Entrypoint auto-copies template -> yaml on first container start when
-# the live file is missing, so a fresh checkout is one `docker compose up`
-# away from a working default-placeholder config.
 src/output_devices/wujihand_output/config/wujihand_ik.yaml
-src/input_devices/wuji_glove/config/wuji_glove.yaml
 src/input_devices/openvr_input/config/openvr_input.yaml
-src/input_devices/pico_input/config/pico_input.yaml
-src/camera/config/camera_config.yaml
 
 # Temporary files
 *.tmp
 *.bak
 *.log
 INTEGRATION_PLAN.md
-src/camera/config/udev/99-teleop-cameras.rules
+work/
+src/wujihandros2/
+src/wuji-retargeting/
+src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml

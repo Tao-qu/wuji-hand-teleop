@@ -44,7 +44,6 @@ class WujiHandController:
         self,
         side: str,
         hand_name: str,
-        input_source: str = "manus",
         retarget_config: Optional[str] = None,
         retarget_config_dir: Optional[str] = None,
         enable_ik: bool = True,
@@ -57,12 +56,11 @@ class WujiHandController:
         Args:
             side: "left" or "right".
             hand_name: wujihandros2 driver namespace (e.g. "left_hand").
-            input_source: input source type (used to pick the IK retarget config).
             retarget_config: explicit retarget config path (optional).
             retarget_config_dir: retarget config directory (optional). When
                 set, lookup order is
-                retarget_{input_source}_{side}.yaml then
-                retarget_{input_source}.yaml — taking priority over the
+                retarget_manus_{side}.yaml then
+                retarget_manus.yaml — taking priority over the
                 wujihand_output package's bundled config/. Used for
                 multi-host deployments: launch passes the local test/
                 config directory so retarget params follow the deploy host.
@@ -82,7 +80,6 @@ class WujiHandController:
 
         self.side = side
         self.hand_name = hand_name
-        self.input_source = input_source
         self.node = node
         self._retarget_config_dir = (
             Path(retarget_config_dir) if retarget_config_dir else None
@@ -104,7 +101,7 @@ class WujiHandController:
         self.logger.info(f"{side}-hand controller initialized (wujihandros2)")
 
     def _resolve_retarget_config(self) -> Optional[str]:
-        """Resolve retarget_{input_source}_{side}.yaml from override dir or package share."""
+        """Resolve retarget_manus_{side}.yaml from override dir or package share."""
         candidate_dirs = []
         if self._retarget_config_dir is not None:
             candidate_dirs.append(self._retarget_config_dir)
@@ -120,7 +117,7 @@ class WujiHandController:
                 f"skipping package default retarget config: {e}")
 
         for cfg_dir in candidate_dirs:
-            per_side = cfg_dir / f"retarget_{self.input_source}_{self.side}.yaml"
+            per_side = cfg_dir / f"retarget_manus_{self.side}.yaml"
             if per_side.exists():
                 self.logger.info(f"IK retarget config: {per_side}")
                 return str(per_side)

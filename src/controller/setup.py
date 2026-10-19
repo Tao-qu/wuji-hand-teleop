@@ -18,9 +18,8 @@ setup(
     zip_safe=True,
     maintainer='Wuji Robotics',
     maintainer_email='dev@wuji.com',
-    description='Unified controller nodes — state machines supporting mode switching',
+    description='MANUS hand control and HTC Tracker arm control nodes',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'tianji_arm_controller = controller.tianji_arm_node:main',

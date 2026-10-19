@@ -3,7 +3,7 @@
 Tianji Arm Chest-frame Driver.
 
 Integrates Cartesian space control (via IK) and joint space control
-(direct joint angles). HTC Tracker / PICO teleop uses the Cartesian
+(direct joint angles). HTC Tracker teleop uses the Cartesian
 path; the joint path is kept for future use.
 
 All tunable parameters load from config/tianji_chest.yaml (single

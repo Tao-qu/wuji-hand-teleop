@@ -14,7 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         # Install config files
         (os.path.join('share', package_name, 'config'),
-            glob('tianji_output/config/*.MvKDCfg') + glob('tianji_output/config/*.yaml')),
+            glob('tianji_output/config/*.MvKDCfg') + glob('tianji_output/config/*.yaml') + glob('tianji_output/config/*.yaml.template')),
     ],
     package_data={
         package_name: [
@@ -33,7 +33,6 @@ setup(
     maintainer_email='your_email@example.com',
     description='Tianji arm hardware interface library - exports TianjiArmController and TianjiChestDriver',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'debug_arm_axis = tianji_output.tools.debug_arm_axis:main',

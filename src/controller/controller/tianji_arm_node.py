@@ -76,7 +76,7 @@ class TianjiArmControllerNode(Node):
         self.declare_parameter('auto_enable', True)
         # Control loop / state-publish rates (Hz, two timers decoupled):
         # - control_rate: TF -> IK control path. 120Hz matches the upper bound
-        #   of HTC tracker / MANUS / wuji_glove input streams; higher adds no
+        #   of HTC tracker / MANUS input streams; higher adds no
         #   new command information.
         # - state_publish_rate: /{side}_arm/joint_states publish rate.
         #   Downstream inference + data capture want finer state feedback;

@@ -80,7 +80,7 @@
         <mesh
           filename="package://wujihand-urdf/Description/meshes/right/finger1_link1.STL" />
       </geometry>
-      <!-- MuJoCo collision parameters - 第一指节增加margin和gap -->
+      <!-- MuJoCo collision parameters - increase margin and gap for the first finger segment -->
       <margin value="0.006"/>
       <gap value="0.004"/>
       <class>collision</class>
@@ -378,7 +378,7 @@
         <mesh
           filename="package://wujihand-urdf/Description/meshes/right/finger2_link1.STL" />
       </geometry>
-      <!-- MuJoCo collision parameters - 第一指节增加margin和gap -->
+      <!-- MuJoCo collision parameters - increase margin and gap for the first finger segment -->
       <margin value="0.006"/>
       <gap value="0.004"/>
       <class>collision</class>
@@ -676,7 +676,7 @@
         <mesh
           filename="package://wujihand-urdf/Description/meshes/right/finger3_link1.STL" />
       </geometry>
-      <!-- MuJoCo collision parameters - 第一指节增加margin和gap -->
+      <!-- MuJoCo collision parameters - increase margin and gap for the first finger segment -->
       <margin value="0.006"/>
       <gap value="0.004"/>
       <class>collision</class>
@@ -974,7 +974,7 @@
         <mesh
           filename="package://wujihand-urdf/Description/meshes/right/finger4_link1.STL" />
       </geometry>
-      <!-- MuJoCo collision parameters - 第一指节增加margin和gap -->
+      <!-- MuJoCo collision parameters - increase margin and gap for the first finger segment -->
       <margin value="0.006"/>
       <gap value="0.004"/>
       <class>collision</class>
@@ -1272,7 +1272,7 @@
         <mesh
           filename="package://wujihand-urdf/Description/meshes/right/finger5_link1.STL" />
       </geometry>
-      <!-- MuJoCo collision parameters - 第一指节增加margin和gap -->
+      <!-- MuJoCo collision parameters - increase margin and gap for the first finger segment -->
       <margin value="0.006"/>
       <gap value="0.004"/>
       <class>collision</class>

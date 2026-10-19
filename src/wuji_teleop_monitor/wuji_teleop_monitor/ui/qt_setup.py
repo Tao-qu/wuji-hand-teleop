@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Qt plugin-path setup — works inside containers and on the host."""
+"""Qt plugin-path setup — local Ubuntu desktop."""
 
 import os
 import sys

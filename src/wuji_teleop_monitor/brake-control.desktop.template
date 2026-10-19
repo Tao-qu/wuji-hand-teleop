@@ -2,9 +2,9 @@
 Version=1.0
 Type=Application
 Name=Wuji Brake Control
-Comment=Direct-SDK arm brake / recovery for the Tianji controller cabinet (Docker)
+Comment=Direct-SDK arm brake / recovery for the Tianji controller cabinet
 Exec={{LAUNCHER}}
-Icon={{PACKAGE_PATH}}/wuji_icon.png
+Icon={{PACKAGE_PATH}}/wuji.svg
 Terminal=false
 Categories=Development;Robotics;
 StartupNotify=true

@@ -50,8 +50,17 @@ class OpenVRInputConfig:
     publish_tf: bool = True
     parent_frame: str = "world"
 
-    # Chest to head offset (meters)
-    chest_to_head_offset_z: float = 0.3
+
+    def __post_init__(self):
+        required = {"chest", "left_wrist", "right_wrist", "left_arm", "right_arm"}
+        serials = self.tracker_serials or {}
+        if set(serials) != required:
+            raise ValueError("Configure exactly five Tracker roles: " + ", ".join(sorted(required)))
+        values = list(serials.values())
+        if any(not isinstance(value, str) or not value or "XXXX" in value for value in values):
+            raise ValueError("Replace Tracker serial placeholders with actual serial numbers")
+        if len(set(values)) != 5:
+            raise ValueError("Each Tracker role must use a distinct serial number")
 
     @classmethod
     def from_file(cls, path: str | Path) -> "OpenVRInputConfig":
@@ -124,7 +133,7 @@ class OpenVRInputNode(Node):
         self.get_logger().info(
             f"[OpenVR Input] Publishing TF at {self.config.publish_rate_hz:.1f} Hz"
         )
-        self.get_logger().info("[OpenVR Input] Publishing TF: head, chest, right_wrist, left_wrist, left_arm, right_arm")
+        self.get_logger().info("[OpenVR Input] Publishing TF: chest, right_wrist, left_wrist, left_arm, right_arm")
 
     def _publish_callback(self) -> None:
         """Timer callback to fetch and publish tracker data as TF."""
@@ -139,7 +148,7 @@ class OpenVRInputNode(Node):
 
         current_time = self.get_clock().now().to_msg()
 
-        # Process chest -> head (with Z offset along chest's local Z axis)
+        # Publish chest reference pose
         chest_pose = poses.get('chest')
         if chest_pose is not None:
             # Publish chest TF
@@ -147,19 +156,6 @@ class OpenVRInputNode(Node):
                 chest_pose,
                 self.config.parent_frame,
                 "chest",
-                current_time
-            )
-
-            # Create head pose by adding offset along chest's local Z axis
-            head_pose = chest_pose.copy()
-            chest_z_axis = chest_pose[:3, 2]  # Local Z axis direction in world frame
-            head_pose[:3, 3] += chest_z_axis * self.config.chest_to_head_offset_z
-
-            # Publish head TF
-            self._broadcast_tf(
-                head_pose,
-                self.config.parent_frame,
-                "head",
                 current_time
             )
 
