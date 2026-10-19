@@ -529,16 +529,16 @@ class TianjiChestDriver:
         if right_joints is not None:
             right_joints = self._joint_limits.validate('right', right_joints)
 
-        self.robot.clear_set()
+        _checked_mode_command(self.robot, 'clear_set')
         if left_joints is not None:
-            self.robot.set_joint_cmd_pose(arm='A', joints=list(left_joints))
+            _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=list(left_joints))
             left_joints_str = ', '.join([f'{j:7.2f}' for j in left_joints])
             self.logger.debug(f"[LEFT]  joints: [{left_joints_str}]")
         if right_joints is not None:
-            self.robot.set_joint_cmd_pose(arm='B', joints=list(right_joints))
+            _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=list(right_joints))
             right_joints_str = ', '.join([f'{j:7.2f}' for j in right_joints])
             self.logger.debug(f"[RIGHT] joints: [{right_joints_str}]")
-        self.robot.send_cmd()
+        _checked_mode_command(self.robot, 'send_cmd')
 
         return left_success, right_success
 

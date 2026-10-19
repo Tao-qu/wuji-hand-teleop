@@ -777,3 +777,34 @@ def test_legacy_set_active_uses_faultfree_mode_switch_without_reset_batch():
     driver.robot.clear_error.assert_not_called()
     driver.robot.clear_set.assert_not_called()
     driver.robot.send_cmd.assert_not_called()
+
+
+@pytest.mark.parametrize('rejected_call', [0, 1, 2, 3])
+def test_direct_target_batch_never_reports_a_rejected_native_command_as_success(rejected_call):
+    calls = []
+
+    def operation(name):
+        def invoke(**kwargs):
+            calls.append((name, kwargs))
+            return len(calls) - 1 != rejected_call
+        return invoke
+
+    robot = SimpleNamespace(**{name: operation(name) for name in
+                               ('clear_set', 'set_joint_cmd_pose', 'send_cmd')})
+    driver = SimpleNamespace(robot=robot, logger=Mock(), _joint_limits=model_limits())
+    with pytest.raises(RuntimeError, match='not accepted'):
+        TianjiChestDriver.move_to_joints_direct(driver, [0] * 7, [1] * 7)
+    assert len(calls) == rejected_call + 1
+    if rejected_call < 3:
+        assert not any(name == 'send_cmd' for name, _ in calls)
+
+
+def test_direct_target_batch_reports_success_after_native_acceptance():
+    robot = Mock()
+    robot.clear_set.return_value = True
+    robot.set_joint_cmd_pose.return_value = True
+    robot.send_cmd.return_value = True
+    driver = SimpleNamespace(robot=robot, logger=Mock(), _joint_limits=model_limits())
+    assert TianjiChestDriver.move_to_joints_direct(driver, [0] * 7, [1] * 7) == (True, True)
+    assert robot.set_joint_cmd_pose.call_count == 2
+    robot.send_cmd.assert_called_once_with()
