@@ -50,6 +50,21 @@ def _checked_mode_command(robot, method, **arguments):
         raise RuntimeError(f'Tianji mode command {method}{arm} was not accepted: {result!r}')
 
 
+def _impedance_entry_pose(robot, feedback_guard):
+    """Use one fresh snapshot for both the state precondition and hold pose."""
+    snapshot = robot.subscribe(DCSS())
+    positions = feedback_guard.observe(snapshot)
+    states = snapshot.get('states')
+    if (not isinstance(states, (list, tuple)) or len(states) != 2 or any(
+            not isinstance(state, dict)
+            or type(state.get('cur_state')) is not int
+            or type(state.get('err_code')) is not int
+            or state['cur_state'] not in (0, 1, 3) or state['err_code'] != 0
+            for state in states)):
+        raise RuntimeError(f'Impedance entry requires fault-free non-transition states 0/1/3: {states}')
+    return positions
+
+
 class TianjiChestDriver:
     """
     Tianji dual-arm Chest-frame driver.
@@ -302,9 +317,9 @@ class TianjiChestDriver:
         """
         Set dual-arm impedance mode.
 
-        Order: set impedance params and type first, then servo-on
-        (state=3). Servoing on with stale params is what causes the
-        first-frame jitter we hit in production.
+        Stage K/D and velocity first, then the measured hold pose and
+        state=3 with its impedance subtype. This follows the vendor mode
+        examples; it is not an established fix for torque-entry error 6.
 
         Args:
             mode: 'joint' or 'cart'.
@@ -314,15 +329,17 @@ class TianjiChestDriver:
         if mode not in ('cart', 'joint'):
             raise ValueError('impedance mode must be cart or joint')
         check_motion_allowed(should_abort)
+        _impedance_entry_pose(self.robot, self._feedback_guard)
+        check_motion_allowed(should_abort)
         if mode == 'cart':
             K = K or [8000, 8000, 8000, 100, 100, 100, 20]
             D = D or [0.3, 0.3, 0.3, 0.4, 0.4, 0.4, 0.4]
 
             _checked_mode_command(self.robot, 'clear_set')
             _checked_mode_command(self.robot, 'set_cart_kd_params', arm='A', K=K, D=D, type=2)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=60, AccRatio=60)
             _checked_mode_command(self.robot, 'set_cart_kd_params', arm='B', K=K, D=D, type=2)
-            _checked_mode_command(self.robot, 'set_impedance_type', arm='A', type=2)
-            _checked_mode_command(self.robot, 'set_impedance_type', arm='B', type=2)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=60, AccRatio=60)
             _checked_mode_command(self.robot, 'send_cmd')
             guarded_wait(0.5, should_abort)
 
@@ -334,9 +351,9 @@ class TianjiChestDriver:
 
             _checked_mode_command(self.robot, 'clear_set')
             _checked_mode_command(self.robot, 'set_joint_kd_params', arm='A', K=K, D=D)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=60, AccRatio=60)
             _checked_mode_command(self.robot, 'set_joint_kd_params', arm='B', K=K, D=D)
-            _checked_mode_command(self.robot, 'set_impedance_type', arm='A', type=1)
-            _checked_mode_command(self.robot, 'set_impedance_type', arm='B', type=1)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=60, AccRatio=60)
             _checked_mode_command(self.robot, 'send_cmd')
             guarded_wait(0.5, should_abort)
 
@@ -344,15 +361,15 @@ class TianjiChestDriver:
 
         # Servo-on after params are loaded.
         check_motion_allowed(should_abort)
-        hold_left, hold_right = self.get_current_joints()
+        hold_left, hold_right = _impedance_entry_pose(self.robot, self._feedback_guard)
         check_motion_allowed(should_abort)
         _checked_mode_command(self.robot, 'clear_set')
         _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=hold_left)
         _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=hold_right)
         _checked_mode_command(self.robot, 'set_state', arm='A', state=3)
+        _checked_mode_command(self.robot, 'set_impedance_type', arm='A', type=1 if mode == 'joint' else 2)
         _checked_mode_command(self.robot, 'set_state', arm='B', state=3)
-        _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=60, AccRatio=60)
-        _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=60, AccRatio=60)
+        _checked_mode_command(self.robot, 'set_impedance_type', arm='B', type=1 if mode == 'joint' else 2)
         _checked_mode_command(self.robot, 'send_cmd')
 
         ok, diag = self._poll_arm_state_after_switch(
