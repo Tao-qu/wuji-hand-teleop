@@ -10,6 +10,8 @@
   <exec_depend>python3-pyqt5</exec_depend>
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>diagnostic_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>wuji_teleop_bringup</depend>
   <depend>wujihand_output</depend>

@@ -1,0 +1,32 @@
+# Wuji Hand 2.2; discover network addresses by these unique serial numbers.
+# Never fall back to the first device returned by SDK discovery.
+left_hand:
+  serial_number: "YOUR_LEFT_HAND2_SERIAL"
+  name: "left_hand"
+right_hand:
+  serial_number: "YOUR_RIGHT_HAND2_SERIAL"
+  name: "right_hand"
+
+driver:
+  model_package: "wuji_hand2_2_description"
+  expected_firmware: "2.5.1"
+  read_only: false
+  auto_enable: false
+  command_rate: 200.0
+  publish_rate: 200.0
+  diagnostics_rate: 10.0
+  command_timeout: 0.25
+  feedback_timeout: 0.25
+  diagnostics_timeout: 0.5
+  enable_timeout: 5.0
+  startup_timeout: 5.0
+  ramp_duration: 1.5
+  max_velocity: 0.5          # rad/s, also enforced during startup ramp
+  kp: 3.0
+  kd: 0.05
+  effort_limit: 1.5          # A, official SDK current limit
+
+controller:
+  control_rate: 120.0
+  input_timeout: 0.20       # SDK-frame age and monotonic receipt deadline
+  flip_y: true             # existing MANUS convention; validate both hands in dry-run

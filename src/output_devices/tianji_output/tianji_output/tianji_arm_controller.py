@@ -15,9 +15,14 @@ except ImportError:
     from ._internal.fx_kine import Marvin_Kine
     from ._internal.structure_data import DCSS
 import time
+import math
 import logging
 import os
+import yaml
 from ament_index_python.packages import get_package_share_directory
+from .tool_parameters import apply_tool_parameters
+from .feedback_guard import (ArmJointLimits, DualArmFeedbackGuard, check_motion_allowed,
+                             guarded_wait, joint_vector, pose_mm, confirm_standby, disable_and_release)
 
 
 class TianjiArmController:
@@ -87,6 +92,7 @@ class TianjiArmController:
             pnva=config_result['PNVA'][1],
             j67=config_result['BD'][1]
         )
+        self._joint_limits = ArmJointLimits(config_result['PNVA'])
 
         # ---------------------- Initialize robot connection ----------------------
         self.logger.debug("Initializing robot control...")
@@ -96,11 +102,6 @@ class TianjiArmController:
         if init == 0:
             raise ConnectionError("Connection failed: port occupied!")
 
-        time.sleep(0.5)
-        self.robot.clear_set()
-        self.robot.clear_error('A')
-        self.robot.clear_error('B')
-        self.robot.send_cmd()
         time.sleep(0.5)
 
         if not self._verify_connection():
@@ -125,34 +126,24 @@ class TianjiArmController:
         self.logger.info("Dual-arm controller initialization complete")
 
     def _set_tool_params(self):
-        # IK solves at the flange (tool_kine zero); mounted-tool kinematics
-        # belong in URDF / chest TF, not in the SDK's set_tool matrix.
-        tool_kine = [0, 0, 0, 0, 0, 0]
-        # Identified Wuji Hand payload (M kg, mr mm, I kg·mm²); rewrite if
-        # you mount a different end-effector.
-        tool_dyn = [0.95, 0, 0, 90, 0, 0, 0, 0, 0, 0]
-
-        self.logger.debug(f"Setting tool parameters: kine={tool_kine}, dyn={tool_dyn}")
-
-        self.robot.clear_set()
-        self.robot.set_tool(arm='A', kineParams=tool_kine, dynamicParams=tool_dyn)
-        self.robot.set_tool(arm='B', kineParams=tool_kine, dynamicParams=tool_dyn)
-        self.robot.send_cmd()
+        share = get_package_share_directory('tianji_output')
+        with open(os.path.join(share, 'config', 'tianji_chest.yaml')) as stream:
+            config = yaml.safe_load(stream)
+        self._active_tool_dynamics = apply_tool_parameters(self.robot, config, self.logger)
         time.sleep(0.3)
 
     def _verify_connection(self):
-        """Verify robot connection"""
+        """Require advancing, complete feedback from both cabinet arms."""
         dcss = DCSS()
-        motion_tag = 0
-        frame_update = None
-        for i in range(5):
-            sub_data = self.robot.subscribe(dcss)
-            serial = sub_data['outputs'][0]['frame_serial']
-            if serial != 0 and frame_update != serial:
-                motion_tag += 1
-                frame_update = serial
+        self._feedback_guard = DualArmFeedbackGuard()
+        for _ in range(20):
+            try:
+                self._feedback_guard.observe(self.robot.subscribe(dcss))
+                return True
+            except ValueError:
+                pass
             time.sleep(0.1)
-        return motion_tag > 0
+        return False
 
     # ==================== State Retrieval Methods ====================
 
@@ -165,9 +156,7 @@ class TianjiArmController:
         """
         dcss = DCSS()
         sub_data = self.robot.subscribe(dcss)
-        left_joints = sub_data["outputs"][0]["fb_joint_pos"]
-        right_joints = sub_data["outputs"][1]["fb_joint_pos"]
-        return left_joints, right_joints
+        return self._feedback_guard.observe(sub_data)
 
     def get_current_joint_velocities(self):
         """
@@ -266,7 +255,10 @@ class TianjiArmController:
             K: Stiffness parameter list (7 elements)
             D: Damping parameter list (7 elements)
         """
+        hold_left, hold_right = self.get_current_joints()
         self.robot.clear_set()
+        self.robot.set_joint_cmd_pose(arm='A', joints=hold_left)
+        self.robot.set_joint_cmd_pose(arm='B', joints=hold_right)
         self.robot.set_state(arm='A', state=3)
         self.robot.set_state(arm='B', state=3)
         self.robot.set_vel_acc(arm='A', velRatio=60, AccRatio=60)
@@ -309,7 +301,7 @@ class TianjiArmController:
 
     # ==================== Cartesian Space Control Methods ====================
 
-    def move_to_pose_direct(self, left_pose=None, right_pose=None, unit='mm'):
+    def move_to_pose_direct(self, left_pose=None, right_pose=None, unit='mm', send=True):
         """
         Cartesian space control: simultaneous dual-arm IK solving and joint command sending (non-blocking, for real-time tracking)
 
@@ -322,18 +314,8 @@ class TianjiArmController:
             tuple: (left_success, right_success, left_joints, right_joints)
         """
         # Convert units to mm
-        left_mm = None
-        right_mm = None
-        if left_pose is not None:
-            left_mm = list(left_pose)
-            if unit == 'm':
-                for i in range(3):
-                    left_mm[i] *= 1000
-        if right_pose is not None:
-            right_mm = list(right_pose)
-            if unit == 'm':
-                for i in range(3):
-                    right_mm[i] *= 1000
+        left_mm = pose_mm(left_pose, unit) if left_pose is not None else None
+        right_mm = pose_mm(right_pose, unit) if right_pose is not None else None
 
         # Get current joints as IK reference
         ref_left, ref_right = self.get_current_joints()
@@ -358,7 +340,7 @@ class TianjiArmController:
                 )
                 if left_ik is not False:
                     if not left_ik.m_Output_IsOutRange and not left_ik.m_Output_IsJntExd:
-                        left_joints = left_ik.m_Output_RetJoint.to_list()
+                        left_joints = self._joint_limits.validate('left', left_ik.m_Output_RetJoint.to_list())
                         left_success = True
             except Exception as e:
                 self.logger.debug(f"Left arm IK solving exception: {e}")
@@ -378,7 +360,7 @@ class TianjiArmController:
                 )
                 if right_ik is not False:
                     if not right_ik.m_Output_IsOutRange and not right_ik.m_Output_IsJntExd:
-                        right_joints = right_ik.m_Output_RetJoint.to_list()
+                        right_joints = self._joint_limits.validate('right', right_ik.m_Output_RetJoint.to_list())
                         right_success = True
             except Exception as e:
                 self.logger.debug(f"Right arm IK solving exception: {e}")
@@ -396,13 +378,11 @@ class TianjiArmController:
         else:
             self.logger.debug("[RIGHT_IK] FAILED!")
 
-        # Send dual-arm joint commands
-        self.robot.clear_set()
-        if left_joints is not None:
-            self.robot.set_joint_cmd_pose(arm='A', joints=left_joints)
-        if right_joints is not None:
-            self.robot.set_joint_cmd_pose(arm='B', joints=right_joints)
-        self.robot.send_cmd()
+        if send:
+            if ((left_pose is not None and not left_success)
+                    or (right_pose is not None and not right_success)):
+                raise RuntimeError('IK failed for a requested arm; neither arm was commanded')
+            self.move_to_joints_direct(left_joints, right_joints)
 
         return left_success, right_success, left_joints, right_joints
 
@@ -421,6 +401,10 @@ class TianjiArmController:
         """
         left_success = left_joints is not None
         right_success = right_joints is not None
+        if left_joints is not None:
+            left_joints = self._joint_limits.validate('left', left_joints)
+        if right_joints is not None:
+            right_joints = self._joint_limits.validate('right', right_joints)
 
         self.robot.clear_set()
         if left_joints is not None:
@@ -435,7 +419,8 @@ class TianjiArmController:
 
         return left_success, right_success
 
-    def move_to_joints_smooth(self, left_target=None, right_target=None, duration=3.0, dt=0.01):
+    def move_to_joints_smooth(self, left_target=None, right_target=None, duration=3.0, dt=0.01,
+                              should_abort=None):
         """
         Smooth dual-arm movement to target joint angles (using quintic polynomial interpolation)
 
@@ -448,20 +433,29 @@ class TianjiArmController:
         Returns:
             bool: Whether successful
         """
+        if not math.isfinite(duration) or not math.isfinite(dt) or duration <= 0 or dt <= 0:
+            raise ValueError("motion duration and dt must be finite and positive")
+        check_motion_allowed(should_abort)
         left_joints, right_joints = self.get_current_joints()
-        start_left = list(left_joints)
-        start_right = list(right_joints)
+        start_left = joint_vector(left_joints, 'left motion start')
+        start_right = joint_vector(right_joints, 'right motion start')
 
         if left_target is None:
             left_target = start_left
         if right_target is None:
             right_target = start_right
+        start_left, left_target = self._joint_limits.validate_quintic(
+            'left', start_left, left_target, duration)
+        start_right, right_target = self._joint_limits.validate_quintic(
+            'right', start_right, right_target, duration)
 
-        num_points = int(duration / dt)
+        num_points = max(1, int(duration / dt))
 
         self.logger.debug(f"Smoothly move to target position({duration}s compliant trajectory)...")
 
         for i in range(num_points + 1):
+            check_motion_allowed(should_abort)
+            self.get_current_joints()
             t = i / num_points
             s = 10 * (t ** 3) - 15 * (t ** 4) + 6 * (t ** 5)
 
@@ -485,7 +479,7 @@ class TianjiArmController:
 
     # ==================== Initial Pose and Release ====================
 
-    def move_to_init(self, wait=True, timeout=1, duration=3.0, dt=0.01):
+    def move_to_init(self, wait=True, timeout=1, duration=3.0, dt=0.01, should_abort=None):
         """
         Move both arms to initial pose simultaneously (using joint space trajectory interpolation for compliant motion)
 
@@ -507,11 +501,18 @@ class TianjiArmController:
             left_target=INIT_JOINTS_LEFT,
             right_target=INIT_JOINTS_RIGHT,
             duration=duration,
-            dt=dt
+            dt=dt,
+            should_abort=should_abort,
         )
 
         if wait:
-            time.sleep(timeout)
+            def abort_or_stale():
+                check_motion_allowed(should_abort)
+                self.get_current_joints()
+                return False
+            guarded_wait(timeout, abort_or_stale)
+
+        check_motion_allowed(should_abort)
 
         final_left, final_right = self.get_current_joints()
         left_errors = [abs(final_left[i] - INIT_JOINTS_LEFT[i]) for i in range(7)]
@@ -534,15 +535,12 @@ class TianjiArmController:
 
         return success
 
-    def disable_and_release(self):
-        """Disable and release both arms"""
-        self.logger.info("Disabling both arms...")
-        self.robot.clear_set()
-        self.robot.set_state(arm='A', state=0)
-        self.robot.set_state(arm='B', state=0)
-        self.robot.send_cmd()
-        time.sleep(2)
+    def disable_and_release(self, poll_timeout=3.0):
+        """Confirm both arms disabled, release the session, and report failures."""
+        self.logger.info("Disabling both arms and releasing cabinet connection")
+        disable_and_release(self.robot, self._feedback_guard, poll_timeout)
+        self.logger.info("Both arms disabled; connection released")
 
-        self.logger.debug("Releasing connection...")
-        self.robot.release_robot()
-        self.logger.info("Safely exited")
+    def set_standby(self, timeout=3.0):
+        """Servo off both arms; a missing confirmation is an error."""
+        confirm_standby(self.robot, self._feedback_guard, timeout)

@@ -19,11 +19,12 @@ setup(
     install_requires=[
         'setuptools',
         'numpy>=1.24.0',
+        'wuji-sdk==2026.10.12',
     ],
     zip_safe=True,
     maintainer='wuji',
     maintainer_email='your_email@example.com',
-    description='Wuji hand hardware interface library — provides the WujiHandController control interface',
+    description='Wuji Hand 2 official retargeting and ROS bridge command interface',
     license='MIT',
     entry_points={
         'console_scripts': [

@@ -1,20 +1,21 @@
-# MANUS–Tianji–Wuji Teleoperation
+# MANUS–Tianji–Wuji Hand 2 Teleoperation
 
-A local ROS 2 Humble teleoperation system for two dexterous hands and two robot arms. A pair of MANUS gloves controls the Wuji hands, while five HTC Vive Trackers control the Tianji arms.
+A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. A pair of MANUS gloves supplies finger motion; five HTC Vive Trackers supply chest, wrist, and upper-arm poses. The hand pipeline uses the official `wuji-sdk==2026.10.12`, including its `RetargetSession`, and the official Hand 2.2 model. The configured hand firmware is `2.5.1`.
 
-## Hardware and operating modes
+## Hardware and modes
 
 | Mode | Input | Output |
 | --- | --- | --- |
-| Hands + arms | Left and right MANUS gloves, five Trackers | Two Wuji hands, two Tianji arms |
-| Hands only | Left and right MANUS gloves | Two Wuji hands |
+| Hands + arms | Two MANUS gloves and five Trackers | Two hands and two arms |
+| Hands only | MANUS gloves | Both hands or one selected hand |
 | Arms only | Five Trackers | Two Tianji arms |
+| Hand read-only | Hand network feedback | Joint state and diagnostics; no hand writes |
 
-Mount the Trackers on the chest, both wrists, and both upper arms. Each Tracker uses a paired receiver, with Lighthouse base stations providing tracking coverage. Hands-only operation does not require SteamVR; arms-only operation does not start glove or dexterous-hand nodes.
+Mount the Trackers on the chest, both wrists, and both upper arms. Hands-only operation does not require SteamVR. The hand network uses SDK discovery and explicit serial-number selection; network addresses are not hard-coded.
 
-## Installation
+## Installation and configuration
 
-The development environment is Ubuntu 22.04 x86_64, Python 3.10, and ROS 2 Humble. Follow [Local environment setup](docs/LOCAL_SETUP.md) to install system dependencies, fetch pinned drivers, configure USB permissions, and build the workspace.
+Use Ubuntu 22.04 x86_64, Python 3.10, and ROS 2 Humble. Follow [Local environment setup](docs/LOCAL_SETUP.md) for the full procedure.
 
 ```bash
 git clone https://github.com/Tao-qu/wuji-hand-teleop.git
@@ -25,91 +26,118 @@ python3 tools/fetch_dependencies.py
 python3 tools/configure.py
 ```
 
-`dependencies.lock.json` pins the external hand driver and retargeting algorithm to specific commits. Downloaded dependency directories are excluded from this project's version control. Changes to the lock file require revalidation of driver interfaces, retargeting configuration, and hardware behavior.
+The fetch tool installs the pinned official model under `src/wuji-description`, with a sparse checkout of `hand2/hand2_2/body`. It refuses to reset an existing checkout with a different revision or local changes. Python runtime versions are pinned in `requirements.txt`.
 
-## Hardware configuration
+The configuration tool copies missing templates and preserves existing local settings. Configure before building with `--symlink-install`:
 
-The configuration tool copies missing templates without overwriting existing settings. Build with `--symlink-install` so installed configuration files remain linked to their sources.
-
-| Configuration | Contents |
+| Configuration | Purpose |
 | --- | --- |
-| `src/input_devices/openvr_input/config/openvr_input.yaml` | Five Tracker serial numbers and wrist mounting offset |
-| `src/output_devices/wujihand_output/config/wujihand_ik.yaml` | Left/right hand serial numbers, namespaces, and driver rates |
-| `src/output_devices/wujihand_output/config/retarget_manus_{left,right}.yaml` | MANUS skeleton retargeting and filtering parameters |
-| `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Controller cabinet IP address and initial joint poses |
-| `src/wuji_teleop_bringup/config/static_transforms.yaml` | Chest and wrist mounting transforms |
+| `src/output_devices/wujihand_output/config/hand2.yaml` | Left/right serials and namespaces; bridge rates, firmware, gains, limits, and MANUS input parameters |
+| `src/input_devices/openvr_input/config/openvr_input.yaml` | Five Tracker serials and the human wrist mounting offset |
+| `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet IP, arm initial poses, tool dynamics source, optional tool transforms |
+| `src/wuji_teleop_bringup/config/static_transforms.yaml` | Chest and wrist coordinate transforms |
 
-Each MANUS glove requires calibration for the current operator; see [MANUS setup](src/input_devices/manus_input/README.md). For Tracker pairing and role assignment, see [SteamVR setup](docs/STEAMVR.md) and the [wearing guide](docs/tracker-wearing-guide.md). The host network interface must be able to reach the robot controller cabinet.
+`hand2.yaml` is the active hand configuration; the controller uses the SDK's built-in Hand 2 retargeting model. `controller.flip_y` preserves the current MANUS convention, and must be checked with left/right pose recordings before motor operation. Calibrate MANUS for the current operator using the [MANUS guide](src/input_devices/manus_input/README.md).
 
-## Running
+The arm configuration defaults to `tool_dynamics.source: controller`: it reads and reuses the cabinet's existing payload values. This does **not** mean that the new hand assembly has been calibrated. After measuring each complete hand, adapter, and cable assembly, select `configured` and supply the independent left/right values described in the template. Tool transforms use millimetres; Tracker offsets use metres. Apply a geometric tool offset in the IK configuration or target TF chain once.
 
-Load the environment from the repository root in each terminal:
+## Start processes, then enable motors
+
+Load the environment in every terminal:
 
 ```bash
 source tools/env.sh
-# GUI: select hands + arms, hands only, or arms only
 ros2 run wuji_teleop_monitor monitor
 ```
 
-Alternatively, use the unified launch entry point:
+In the GUI, **Start Teleop** starts the selected processes. It does not enable hand or arm motors. Use **Enable Left Hand 2**, **Enable Right Hand 2**, or **Enable Arms** explicitly. Enabling the arms moves them to their initial pose and then enters impedance mode. Hand enable waits for complete feedback and diagnostics, then ramps from the measured pose toward incoming commands.
+
+The same launch file supports terminal operation:
 
 ```bash
-# Hands + arms
+# Hands + arms; motors remain disabled until explicitly enabled
 ros2 launch wuji_teleop_bringup wuji_teleop.launch.py
-# Hands only
+# Both hands only
 ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_arm:=false
+# Left hand only
+ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_arm:=false hand_side:=left
+# Right hand feedback only; skips MANUS and the retarget controller
+ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_arm:=false hand_side:=right hand_read_only:=true
 # Arms only
 ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false
-# Visualize Tracker coordinate frames
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false enable_rviz:=true
 ```
 
-Enabling the arms moves them to their initial pose and enters impedance mode. Check the workspace and emergency stop before starting, and calibrate mounting positions and coordinate offsets for the actual hardware. Validate the hand and arm pipelines separately before running the full system.
+`hand_side` accepts `both`, `left`, or `right`. `hand_auto_enable` and `arm_auto_enable` default to `false`. `hand_config` can select another complete hand YAML. Read-only hand mode forbids enable and device writes. For normal operation, enable individual chains with the GUI or these services after checking the work area:
 
-The GUI displays joint feedback, command rates, and logs. Readiness requires data from the selected pipelines: feedback and commands from both hands, and the READY lifecycle state from the arms. `Scan SNs` scans and configures Wuji Hands only; MANUS messages are routed by their left/right side field. The GUI monitors `/left_hand` and `/right_hand` by default. Update the monitor subscriptions if the driver namespaces change.
+```bash
+ros2 service call /left_hand/set_enabled std_srvs/srv/SetBool '{data: true}'
+ros2 service call /right_hand/set_enabled std_srvs/srv/SetBool '{data: true}'
+ros2 service call /tianji_arm_controller/set_enabled std_srvs/srv/SetBool '{data: true}'
+# Disable a hand without stopping its feedback process
+ros2 service call /left_hand/set_enabled std_srvs/srv/SetBool '{data: false}'
+```
 
-Use Stop or Ctrl-C in the terminal to stop teleoperation. The separate brake tool connects directly to the controller cabinet through the SDK; stop teleoperation first to release the connection:
+The monitor uses the default `/left_hand` and `/right_hand` namespaces. It shows each chain's lifecycle and feedback, and allows the two hands to be enabled independently. `Scan SNs` discovers Wuji Hand 2 devices and saves selected serials; MANUS input is routed by its left/right `side` field.
+
+A successful hand service response means the request was queued. The monitor confirms `STOPPED (disabled)` and allows another Enable only after fresh diagnostics report all 20 joints online and zero joints enabled.
+
+**Stop Teleop** or terminal Ctrl-C stops the launch process group. Each hardware process performs its own cleanup; the hand bridge also has input, feedback, and diagnostic watchdogs. A hand fault is latched and does not automatically resume motion. Resolve its cause, clear it, then explicitly re-enable:
+
+```bash
+ros2 service call /left_hand/clear_fault std_srvs/srv/Trigger '{}'
+ros2 service call /left_hand/set_enabled std_srvs/srv/SetBool '{data: true}'
+```
+
+The separate brake tool connects directly to the cabinet; stop the arm controller before opening it:
 
 ```bash
 ros2 run wuji_teleop_monitor brake
-# Optional: install local desktop shortcuts
+# Optional desktop shortcuts
 bash src/wuji_teleop_monitor/install_desktop.sh
 ```
 
-## Data flow and repository layout
+## Data contracts and code layout
 
 ```text
-MANUS → manus_ros2 → left/right hand controllers → wuji_retargeting
-      → /{side}_hand/joint_commands → wujihand_driver → Wuji Hand
+MANUS → manus_ros2 → validate 21 keypoints per side
+      → official RetargetSession(WujiHand2)
+      → /{side}_hand/joint_commands → wuji_hand2_driver → SDK → hand
 
-5 Trackers → OpenVR → TF → tianji_arm_controller
-           → chest-frame IK → Tianji SDK → both arms
+5 Trackers → OpenVR → TF → tianji_arm_controller → Tianji IK/SDK → arms
 ```
 
-- `src/input_devices/manus_input/`: MANUS C++ driver, messages, calibration, and USB permission rules.
-- `src/input_devices/openvr_input/`: Five-Tracker pose acquisition, coordinate corrections, and TF publishing.
-- `src/controller/`: Per-hand control loops, arm lifecycle management, and IK scheduling.
-- `src/output_devices/`: Hand retargeting interfaces and Tianji hardware wrappers.
-- `src/wuji_teleop_bringup/`: Mode-specific node creation and static TF setup.
-- `src/wuji_teleop_monitor/`: Local Qt monitor and brake tool.
-- `src/wujihand_urdf/`: Dexterous-hand model descriptions.
-- `tools/`: Dependency fetching, configuration generation, environment loading, and read-only checks.
+The hand retargeting input is a finite `(21, 3)` array in metres, in MediaPipe landmark order. Missing nodes, duplicate IDs, implausible scale, and degenerate palm frames are rejected. The output is 20 joint positions in radians, in SDK firmware order: thumb, index, middle, ring, pinky, four joints each. The bridge maps feedback NIDs explicitly; it does not infer motor order from URDF traversal. Named ROS feedback uses the official Hand 2.2 joint names.
 
-Each hand has an independent control process, running at 120 Hz by default. Arm control defaults to 120 Hz, with state publishing at 500 Hz. Actual rates depend on input, solver performance, and communication.
+Each hand has a persistent retargeting session in a separate process. MANUS control defaults to 120 Hz; the bridge command/state rates default to 200 Hz. The publisher timestamps each new SDK skeleton callback, advances its per-glove sequence, and publishes each sequence once. Its steady-clock source timeout is 0.20 s. The controller rejects repeated or reordered sequences and expired source stamps, and applies a monotonic receipt deadline shortened by the source age. Invalid input or a gap resets the retargeting session; the bridge command watchdog defaults to 0.25 s. Restart publisher and controller together if the publisher restarts its sequence counter. Actual rates depend on input and runtime conditions.
 
-## Checks and development
+| Directory | Implementation |
+| --- | --- |
+| `src/input_devices/manus_input/` | MANUS C++ input, messages, calibration |
+| `src/input_devices/openvr_input/` | Five-Tracker acquisition and TF |
+| `src/controller/` | Per-hand input loops and arm lifecycle |
+| `src/output_devices/wujihand_output/` | Input validation, official retargeting, ROS transport |
+| `src/wuji_hand2_driver/` | SDK ownership, Hand 2 commands, diagnostics, limits and watchdogs |
+| `src/wuji-description/hand2/hand2_2/body/` | Pinned official model package |
+| `src/output_devices/tianji_output/` | Tianji SDK/IK and tool parameters |
+| `src/wuji_teleop_bringup/` | Launch configuration and static transforms |
+| `src/wuji_teleop_monitor/` | Qt monitor, explicit enable/disable, brake tool |
+| `tests/`, `tools/` | Offline checks and environment/configuration tools |
+
+## Checks and references
 
 ```bash
 source tools/env.sh
 python3 tools/check_environment.py --mode all
-ros2 topic hz /manus_glove_0
-ros2 topic hz /left_hand/joint_commands
-ros2 topic hz /left_arm/joint_states
-ros2 topic echo /tianji_arm/lifecycle_state
+python3 -m unittest discover -s tests -v
+ros2 topic hz /left_hand/joint_states
+ros2 topic echo /left_hand/lifecycle_state
+ros2 topic echo /left_hand/diagnostics
 ```
 
-Environment checks only import modules and load SDK libraries; they do not connect to hardware. Successful builds and environment checks do not replace hardware validation. After changing control or kinematic parameters, validate both hands, both arms, startup, shutdown, and emergency-stop recovery.
+Environment checks and unit tests do not command hardware. Tests that use `RetargetSession` run the pure retargeting API without creating an SDK device manager. Successful software checks do not establish motor direction, real-world tracking quality, payload calibration, or full-system hardware acceptance.
+
+Implementation follows the official [SDK Python retargeting examples](https://github.com/wuji-technology/wuji-sdk/tree/v2026.10.12/examples/python/retargeting), [Hand 2 examples](https://github.com/wuji-technology/wuji-sdk/tree/v2026.10.12/examples/python/wuji_hand_2), and [Hand 2.2 model](https://github.com/wuji-technology/wuji-description/tree/829c9aa27cb12c3a49d5b8d63c9869dd8f656702/hand2/hand2_2/body). See [documentation](docs/README.md) for the setup and wearing guides.
 
 ## License
 
-See [LICENSE](LICENSE) for the project code. MANUS and Tianji SDKs and external dependencies retain their respective licenses. Preserve their copyright and license notices.
+See [LICENSE](LICENSE). MANUS, Tianji, Wuji SDK, and model resources retain their respective licenses and copyright notices.

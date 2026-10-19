@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Source this file in every terminal used for building or running the system.
 _TELEOP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "$_TELEOP_ROOT/tools/env.local.sh" ]]; then
+    source "$_TELEOP_ROOT/tools/env.local.sh"
+fi
 source /opt/ros/humble/setup.bash
 if [[ -f "$_TELEOP_ROOT/.venv/bin/activate" ]]; then
     source "$_TELEOP_ROOT/.venv/bin/activate"

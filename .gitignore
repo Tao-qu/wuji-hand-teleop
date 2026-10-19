@@ -27,6 +27,7 @@ venv/
 env/
 ENV/
 .venv
+tools/env.local.sh
 
 # IDEs
 .vscode/
@@ -43,7 +44,7 @@ ENV/
 # Repo tracks `<file>.yaml.template` only. Operator copies the template
 # to `<file>.yaml`, fills real values, and the live file stays out of git.
 # Launch helpers + Scan SNs UI both read the single `<file>.yaml` path.
-src/output_devices/wujihand_output/config/wujihand_ik.yaml
+src/output_devices/wujihand_output/config/hand2.yaml
 src/input_devices/openvr_input/config/openvr_input.yaml
 
 # Temporary files
@@ -52,6 +53,5 @@ src/input_devices/openvr_input/config/openvr_input.yaml
 *.log
 INTEGRATION_PLAN.md
 work/
-src/wujihandros2/
-src/wuji-retargeting/
+src/wuji-description/
 src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml

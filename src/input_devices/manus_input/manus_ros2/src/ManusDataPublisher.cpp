@@ -5,6 +5,7 @@
 #include <thread>
 #include "rclcpp/qos.hpp"
 #include <chrono>
+#include <cmath>
 
 #include "ClientLogging.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -18,6 +19,10 @@ ManusDataPublisher::ManusDataPublisher() : Node("manus_data_publisher")
 {
     if (s_Instance != nullptr) {
         throw std::runtime_error("This can only be initialized once.");
+    }
+    m_SourceTimeout = declare_parameter<double>("source_timeout", 0.20);
+    if (!std::isfinite(m_SourceTimeout) || m_SourceTimeout <= 0.0) {
+        throw std::invalid_argument("source_timeout must be finite and positive");
     }
     s_Instance = this;
 
@@ -180,9 +185,11 @@ ClientReturnCode ManusDataPublisher::RegisterAllCallbacks()
 void ManusDataPublisher::PublishCallback()
 {
     //Copy data
-    m_RawSkeletonMutex.lock();
-    std::map <uint32_t, ClientRawSkeleton> t_GloveDataMap = m_GloveDataMap;
-    m_RawSkeletonMutex.unlock();
+    std::map<uint32_t, ClientRawSkeleton> t_GloveDataMap;
+    {
+        std::lock_guard<std::mutex> lock(m_RawSkeletonMutex);
+        t_GloveDataMap = m_GloveDataMap;
+    }
 
     m_ErgonomicsMutex.lock();
     std::map <uint32_t, ErgonomicsData> t_ErgonomicsDataMap = m_ErgonomicsDataMap;
@@ -265,9 +272,18 @@ void ManusDataPublisher::PublishCallback()
             continue;
         }
 
-        ClientRawSkeleton t_RawSkel = t_GloveDataMap[t_Msg.glove_id];
-        if(t_RawSkel.info.nodesCount == 0) continue;
-
+        const ClientRawSkeleton& t_RawSkel = t_GloveDataMap.at(t_Msg.glove_id);
+        // The timer must not turn a frozen cached skeleton into fresh ROS data.
+        const double t_SourceAge = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - t_RawSkel.received_at).count();
+        if (t_RawSkel.info.nodesCount == 0 || t_RawSkel.sequence == 0 ||
+            t_RawSkel.sequence <= m_LastPublishedSequence[t_Msg.glove_id] ||
+            t_SourceAge < 0.0 || t_SourceAge >= m_SourceTimeout) {
+            continue;
+        }
+        t_Msg.header = t_RawSkel.header;
+        t_Msg.header.frame_id = "manus_" + t_Msg.side;
+        t_Msg.sequence = t_RawSkel.sequence;
         t_Msg.raw_node_count = t_RawSkel.info.nodesCount;
               
         for (const auto &node: t_RawSkel.nodes) {
@@ -358,6 +374,7 @@ void ManusDataPublisher::PublishCallback()
         
         if (t_Publisher->second) {
             t_Publisher->second->publish(t_Msg);
+            m_LastPublishedSequence[t_Msg.glove_id] = t_RawSkel.sequence;
         }
         
         m_PublishCountMap[t_Msg.glove_id]++;
@@ -436,23 +453,32 @@ ClientReturnCode ManusDataPublisher::Connect()
 /// The data is not directly passed to the callback, but needs to be retrieved from the SDK for it to be used. This is demonstrated in the function below.
 void ManusDataPublisher::OnRawSkeletonStreamCallback(const SkeletonStreamInfo *const p_RawSkeletonStreamInfo)
 {
-    if (s_Instance) {
+    if (!s_Instance || !p_RawSkeletonStreamInfo) return;
 
-        s_Instance->m_RawSkeletonMutex.lock();
-        for (uint32_t i = 0; i < p_RawSkeletonStreamInfo->skeletonsCount; i++) {
-            ClientRawSkeleton t_NxtClientRawSkeleton;
-            CoreSdk_GetRawSkeletonInfo(i, &t_NxtClientRawSkeleton.info);
-
-            // Retrieves info on the skeletonData, like deviceID and the amount of nodes.
-            t_NxtClientRawSkeleton.nodes.resize(t_NxtClientRawSkeleton.info.nodesCount);
-            t_NxtClientRawSkeleton.info.publishTime = p_RawSkeletonStreamInfo->publishTime;
-
-            // Retrieves the skeletonData, which contains the node data.
-            CoreSdk_GetRawSkeletonData(i, t_NxtClientRawSkeleton.nodes.data(), t_NxtClientRawSkeleton.info.nodesCount);
-
-            s_Instance->m_GloveDataMap.insert_or_assign(t_NxtClientRawSkeleton.info.gloveId, t_NxtClientRawSkeleton);
+    std::lock_guard<std::mutex> lock(s_Instance->m_RawSkeletonMutex);
+    for (uint32_t i = 0; i < p_RawSkeletonStreamInfo->skeletonsCount; i++) {
+        ClientRawSkeleton t_Next;
+        if (CoreSdk_GetRawSkeletonInfo(i, &t_Next.info) != SDKReturnCode_Success ||
+            t_Next.info.nodesCount == 0) {
+            continue;
         }
-        s_Instance->m_RawSkeletonMutex.unlock();
+        auto previous = s_Instance->m_GloveDataMap.find(t_Next.info.gloveId);
+        // Repeated nonzero SDK publish timestamps identify a cached SDK frame.
+        if (previous != s_Instance->m_GloveDataMap.end() &&
+            p_RawSkeletonStreamInfo->publishTime.time != 0 &&
+            previous->second.info.publishTime.time == p_RawSkeletonStreamInfo->publishTime.time) {
+            continue;
+        }
+        t_Next.nodes.resize(t_Next.info.nodesCount);
+        if (CoreSdk_GetRawSkeletonData(i, t_Next.nodes.data(), t_Next.info.nodesCount) != SDKReturnCode_Success) {
+            continue;
+        }
+        t_Next.info.publishTime = p_RawSkeletonStreamInfo->publishTime;
+        t_Next.received_at = std::chrono::steady_clock::now();
+        t_Next.header.stamp = s_Instance->get_clock()->now();
+        t_Next.sequence = previous == s_Instance->m_GloveDataMap.end()
+            ? 1 : previous->second.sequence + 1;
+        s_Instance->m_GloveDataMap.insert_or_assign(t_Next.info.gloveId, std::move(t_Next));
     }
 }
 

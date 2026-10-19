@@ -9,7 +9,7 @@ from typing import Optional
 
 import numpy as np
 import rclpy
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (
     QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy,
@@ -24,6 +24,7 @@ from std_msgs.msg import Float64MultiArray, Int8
 from std_srvs.srv import SetBool, Trigger
 
 from tianji_output import TianjiChestDriver
+from tianji_output.feedback_guard import joint_vector, limit_joint_step
 from .common import (
     ArmState,
     ROS2LoggerAdapter,
@@ -67,13 +68,17 @@ class TianjiArmControllerNode(Node):
     def __init__(self, robot_ip: str = '192.168.1.190'):
         super().__init__("tianji_arm_controller")
 
-        # auto_enable=True (default): node powers up the arm asynchronously
+        # auto_enable=True: node powers up the arm asynchronously
         # via a one-shot timer after __init__ returns. Setting it False keeps
         # the arm in standby on startup; operators then call ~/set_enabled to
         # bring it up. Decoupling enable from __init__ keeps SIGINT during the
         # ~10s move_to_init from leaving the node half-constructed (so
         # shutdown() never ran and the arm stayed live).
-        self.declare_parameter('auto_enable', True)
+        self.declare_parameter('auto_enable', False)
+        self.declare_parameter('tracker_timeout', 0.25)
+        self._tracker_timeout = float(self.get_parameter('tracker_timeout').value)
+        if not np.isfinite(self._tracker_timeout) or self._tracker_timeout <= 0:
+            raise ValueError('tracker_timeout must be finite and positive')
         # Control loop / state-publish rates (Hz, two timers decoupled):
         # - control_rate: TF -> IK control path. 120Hz matches the upper bound
         #   of HTC tracker / MANUS input streams; higher adds no
@@ -84,6 +89,10 @@ class TianjiArmControllerNode(Node):
         # No rebuild required to change rates — launch / param yaml overrides work.
         self.declare_parameter('control_rate', 120.0)
         self.declare_parameter('state_publish_rate', 500.0)
+        self.declare_parameter('max_joint_velocity_deg_s', 30.0)
+        self._max_joint_velocity = float(self.get_parameter('max_joint_velocity_deg_s').value)
+        if not np.isfinite(self._max_joint_velocity) or not 0 < self._max_joint_velocity <= 30.0:
+            raise ValueError('max_joint_velocity_deg_s must be finite and within (0,30]')
         # Handoff after move_to_init: hold the init pose for `handoff_hold_sec`,
         # then run a `handoff_ramp_sec` smoothstep ramp from the snapshot of
         # current hardware joints to the live IK target. Avoids the snap from
@@ -95,14 +104,17 @@ class TianjiArmControllerNode(Node):
         auto_enable = bool(self.get_parameter('auto_enable').value)
         self._control_rate_hz = float(self.get_parameter('control_rate').value)
         self._state_publish_rate_hz = float(self.get_parameter('state_publish_rate').value)
-        self._handoff_hold_sec = max(0.0, float(self.get_parameter('handoff_hold_sec').value))
-        self._handoff_ramp_sec = max(0.0, float(self.get_parameter('handoff_ramp_sec').value))
-        if self._control_rate_hz <= 0.0:
+        self._handoff_hold_sec = float(self.get_parameter('handoff_hold_sec').value)
+        self._handoff_ramp_sec = float(self.get_parameter('handoff_ramp_sec').value)
+        if not np.isfinite(self._control_rate_hz) or self._control_rate_hz <= 0.0:
             raise ValueError(
                 f"control_rate must be > 0, got {self._control_rate_hz}")
-        if self._state_publish_rate_hz <= 0.0:
+        if not np.isfinite(self._state_publish_rate_hz) or self._state_publish_rate_hz <= 0.0:
             raise ValueError(
                 f"state_publish_rate must be > 0, got {self._state_publish_rate_hz}")
+        if (not np.isfinite(self._handoff_hold_sec) or not np.isfinite(self._handoff_ramp_sec)
+                or self._handoff_hold_sec < 0.0 or self._handoff_ramp_sec < 0.0):
+            raise ValueError('handoff times must be finite and nonnegative')
 
         self._arm_state = ArmState.IMPEDANCE
         self._logger_adapter = ROS2LoggerAdapter(self.get_logger())
@@ -116,6 +128,7 @@ class TianjiArmControllerNode(Node):
         # STANDBY / ACTIVE state management.
         self._arm_enabled = False
         self._enable_lock = threading.Lock()
+        self._shutdown_requested = threading.Event()
 
         # Pose and joint caches.
         self.left_pose = None
@@ -130,12 +143,17 @@ class TianjiArmControllerNode(Node):
         self._handoff_start_at: Optional[float] = None
         self._handoff_start_left: Optional[list] = None
         self._handoff_start_right: Optional[list] = None
+        self._last_command_left = None
+        self._last_command_right = None
+        self._last_command_at = None
 
         # Always enter standby first. set_standby failure (e.g. state=100
         # under e-stop) must not block node startup, otherwise launch
         # respawn=True crash-loops until the fault is cleared externally.
+        standby_ready = False
         try:
             self.controller.set_standby()
+            standby_ready = True
             self.get_logger().info("Arm connected; servos in standby")
         except Exception as exc:
             self.get_logger().error(
@@ -153,7 +171,15 @@ class TianjiArmControllerNode(Node):
 
         # TF listener.
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        # Long initialization motions run synchronously on the control node.
+        # Keep TF reception alive on its own node/executor; this thread never
+        # accesses the robot SDK or sends a motion command.
+        self._tf_node = Node('tianji_tracker_listener', context=self.context)
+        self.tf_listener = TransformListener(self.tf_buffer, self._tf_node)
+        self._tf_executor = SingleThreadedExecutor(context=self.context)
+        self._tf_executor.add_node(self._tf_node)
+        self._tf_thread = threading.Thread(target=self._spin_tf, name='tianji-tf', daemon=True)
+        self._tf_thread.start()
 
         qos = get_default_qos()
 
@@ -201,6 +227,8 @@ class TianjiArmControllerNode(Node):
             f"Init complete: control_rate={self._control_rate_hz:.1f}Hz, "
             f"state_publish_rate={self._state_publish_rate_hz:.1f}Hz"
         )
+        if not auto_enable:
+            self._publish_lifecycle(LIFECYCLE_DISABLED if standby_ready else LIFECYCLE_SDK_ERROR)
 
     # -------------------- Latched lifecycle state --------------------
 
@@ -262,6 +290,8 @@ class TianjiArmControllerNode(Node):
         with self._enable_lock:
             if self._arm_enabled:
                 return
+            if not self._trackers_ready():
+                raise RuntimeError('All five Trackers must have fresh valid poses before enabling arms')
             self._publish_lifecycle(LIFECYCLE_ENABLING)
             # Position mode with FULL velocity/acceleration ratio so the joints
             # actually reach init pose in the allotted window. Earlier defaults
@@ -270,16 +300,30 @@ class TianjiArmControllerNode(Node):
             # residual check failed and the operator's Stop got gated forever.
             # quintic-blend duration 8s + 15s settle covers the worst case
             # (~170° single-joint traverse at this rate).
-            self.controller.set_position_mode(velRatio=100, AccRatio=100)
-            result = self.controller.move_to_init(wait=True, timeout=15, duration=8.0)
-            if result is False:
-                self.get_logger().error("move_to_init failed or timed out")
-                raise RuntimeError("move_to_init failed")
-            self.controller.set_impedance_mode(mode='joint')
-            self._arm_enabled = True
-            self._arm_state = ArmState.IMPEDANCE
-            self._arm_handoff_snapshot()
-            self._publish_lifecycle(LIFECYCLE_READY)
+            try:
+                self.controller.set_position_mode(velRatio=100, AccRatio=100)
+                result = self.controller.move_to_init(
+                    wait=True, timeout=15, duration=8.0,
+                    should_abort=self._initialization_should_abort)
+                if result is False:
+                    raise RuntimeError("move_to_init failed")
+                if self._initialization_should_abort():
+                    raise RuntimeError("tracker input lost during initialization")
+                self.controller.set_impedance_mode(mode='joint')
+                if self._initialization_should_abort():
+                    raise RuntimeError("tracker input lost before teleoperation handoff")
+                self._arm_handoff_snapshot()
+                self._arm_state = ArmState.IMPEDANCE
+                self._arm_enabled = True
+                self._publish_lifecycle(LIFECYCLE_READY)
+            except BaseException:
+                self._arm_enabled = False
+                self._handoff_start_at = None
+                try:
+                    self.controller.set_standby()
+                except Exception as stop_error:
+                    self.get_logger().error(f"Standby after initialization failure failed: {stop_error}")
+                raise
 
     def _do_disable(self):
         """Standby (servo-off, keep connection). Idempotent under _enable_lock."""
@@ -288,8 +332,20 @@ class TianjiArmControllerNode(Node):
             self._arm_state = ArmState.IMPEDANCE
             self.left_pose = None
             self.right_pose = None
+            self.left_y_axis = None
+            self.right_y_axis = None
+            self._handoff_start_at = None
+            self._handoff_start_left = None
+            self._handoff_start_right = None
+            self._last_command_left = None
+            self._last_command_right = None
+            self._last_command_at = None
+            try:
+                self.controller.set_standby()
+            except Exception:
+                self._publish_lifecycle(LIFECYCLE_SDK_ERROR)
+                raise
             self._publish_lifecycle(LIFECYCLE_DISABLED)
-            self.controller.set_standby()
 
     def _auto_enable_once(self):
         """One-shot timer callback: run _do_enable asynchronously. A failure
@@ -324,23 +380,28 @@ class TianjiArmControllerNode(Node):
         _teleop_control blends from the snapshot to live IK over
         handoff_hold_sec + handoff_ramp_sec.
         """
-        if self._handoff_hold_sec <= 0.0 and self._handoff_ramp_sec <= 0.0:
-            self._handoff_start_at = None
-            return
         try:
             left, right = self.controller.get_current_joints()
-            self._handoff_start_left = list(left) if left is not None else None
-            self._handoff_start_right = list(right) if right is not None else None
+            # Driver validates advancing cabinet frames, so a legitimate zero
+            # pose is distinguishable from a default/uninitialized zero cache.
+            self._handoff_start_left = joint_vector(left, 'left handoff snapshot')
+            self._handoff_start_right = joint_vector(right, 'right handoff snapshot')
+            self._last_command_left = self._handoff_start_left.copy()
+            self._last_command_right = self._handoff_start_right.copy()
+            self._last_command_at = time.monotonic()
+            if self._handoff_hold_sec <= 0.0 and self._handoff_ramp_sec <= 0.0:
+                self._handoff_start_at = None
+                return
             self._handoff_start_at = time.monotonic()
             self.get_logger().info(
                 f"Handoff ramp armed: hold={self._handoff_hold_sec:.2f}s, "
                 f"ramp={self._handoff_ramp_sec:.2f}s"
             )
         except Exception as exc:
-            self.get_logger().warning(
-                f"Handoff snapshot failed ({exc}); first IK frame will go straight to hardware"
-            )
             self._handoff_start_at = None
+            self._handoff_start_left = None
+            self._handoff_start_right = None
+            raise RuntimeError(f"Cannot start teleoperation without measured handoff pose: {exc}") from exc
 
     def _set_enabled_callback(self, request: SetBool.Request, response: SetBool.Response):
         """ROS2 service: remote enable/disable. Fast-path based on SDK
@@ -353,10 +414,17 @@ class TianjiArmControllerNode(Node):
             except Exception as e:
                 self.get_logger().error(f"Failed to read hardware state (full enable path): {e}")
                 left_s, right_s = -1, -1
-            if left_s == 3 and right_s == 3:
-                self._arm_enabled = True
+            if self._arm_enabled and left_s == 3 and right_s == 3 and self._trackers_ready():
                 response.success = True
                 response.message = "Already enabled (hardware in state=3)"
+                return response
+            if self._arm_enabled:
+                try:
+                    self._do_disable()
+                except Exception as exc:
+                    self._on_sdk_error('lost_enable_readiness', exc)
+                response.success = False
+                response.message = 'Existing arm session lost hardware/tracker readiness; stopped both arms'
                 return response
             try:
                 self.get_logger().info("Enabling arms: set_active + move_to_init")
@@ -367,6 +435,10 @@ class TianjiArmControllerNode(Node):
             except Exception as e:
                 self.get_logger().error(f"Enable failed: {e}")
                 self._arm_enabled = False
+                try:
+                    self.controller.set_standby()
+                except Exception as stop_error:
+                    self.get_logger().error(f"Standby after enable failure failed: {stop_error}")
                 self._publish_lifecycle(LIFECYCLE_ENABLE_FAILED)
                 response.success = False
                 response.message = f"Arm enable failed: {e}"
@@ -529,6 +601,14 @@ class TianjiArmControllerNode(Node):
         if right_arm_tf is not None:
             self.right_y_axis = right_arm_tf[:3, 1]
 
+        if any(value is None for value in (left_tf, right_tf, left_arm_tf, right_arm_tf)):
+            self.get_logger().error("Tracker pose stale or unavailable; stopping both arms")
+            try:
+                self._do_disable()
+            except Exception as exc:
+                self._on_sdk_error("tracker_timeout", exc)
+            return
+
         # Log every 3 seconds.
         self._log_counter += 1
         if self._log_counter >= 300:
@@ -547,20 +627,25 @@ class TianjiArmControllerNode(Node):
 
             blend_s = self._handoff_blend_factor()  # None = ramp finished, otherwise 0..1
             try:
-                if blend_s is None:
-                    # Steady-state teleop: single SDK call, IK + dispatch fused.
-                    _, _, l_joints, r_joints = self.controller.move_to_pose_direct(
-                        left_pose=self.left_pose, right_pose=self.right_pose, unit='m')
-                else:
-                    # Handoff window: dry-run IK, blend with snapshot, then dispatch.
-                    _, _, l_target, r_target = self.controller.move_to_pose_direct(
-                        left_pose=self.left_pose, right_pose=self.right_pose,
-                        unit='m', send=False)
-                    l_joints = self._blend_joints(self._handoff_start_left, l_target, blend_s)
-                    r_joints = self._blend_joints(self._handoff_start_right, r_target, blend_s)
-                    if l_joints is not None or r_joints is not None:
-                        self.controller.move_to_joints_direct(
-                            left_joints=l_joints, right_joints=r_joints)
+                # Always solve both sides before any write. One failed IK
+                # must not leave the other arm following the operator alone.
+                left_ok, right_ok, l_target, r_target = self.controller.move_to_pose_direct(
+                    left_pose=self.left_pose, right_pose=self.right_pose, unit='m', send=False)
+                if not (left_ok and right_ok):
+                    raise RuntimeError('dual-arm IK incomplete; stopping both arms')
+                l_joints = joint_vector(l_target, 'left IK target')
+                r_joints = joint_vector(r_target, 'right IK target')
+                if blend_s is not None:
+                    l_joints = self._blend_joints(self._handoff_start_left, l_joints, blend_s)
+                    r_joints = self._blend_joints(self._handoff_start_right, r_joints, blend_s)
+                now = time.monotonic()
+                dt = min(1.0 / self._control_rate_hz, max(0.0, now - self._last_command_at))
+                max_step = self._max_joint_velocity * dt
+                l_joints = limit_joint_step(self._last_command_left, l_joints, max_step)
+                r_joints = limit_joint_step(self._last_command_right, r_joints, max_step)
+                self.controller.move_to_joints_direct(left_joints=l_joints, right_joints=r_joints)
+                self._last_command_left, self._last_command_right = l_joints, r_joints
+                self._last_command_at = now
                 self._publish_command(l_joints, r_joints)
             except Exception as e:
                 self._on_sdk_error("teleop_control", e)
@@ -596,16 +681,12 @@ class TianjiArmControllerNode(Node):
     @staticmethod
     def _blend_joints(start: Optional[list], target: Optional[list],
                       s: float) -> Optional[list]:
-        """Return start*(1-s) + target*s; preserve target if start is missing,
-        and preserve start if target is missing (lets a per-side TF dropout
-        still hold its snapshot instead of going None)."""
-        if target is None and start is None:
-            return None
-        if start is None:
-            return list(target)
-        if target is None:
-            return list(start)
-        return [start[i] + s * (target[i] - start[i]) for i in range(len(start))]
+        """Blend only complete measured snapshots and finite IK targets."""
+        start = joint_vector(start, 'handoff start')
+        target = joint_vector(target, 'handoff target')
+        if not np.isfinite(s) or not 0.0 <= s <= 1.0:
+            raise ValueError('handoff blend factor must be finite and within [0,1]')
+        return [start[i] + s * (target[i] - start[i]) for i in range(7)]
 
     # -------------------- Publish --------------------
 
@@ -629,6 +710,8 @@ class TianjiArmControllerNode(Node):
     def _publish_state(self):
         try:
             left_joints, right_joints = self.controller.get_current_joints()
+            left_joints = joint_vector(left_joints, 'left published feedback')
+            right_joints = joint_vector(right_joints, 'right published feedback')
             self._state_error_count = 0  # reset on success
             self._last_left_state_joints = list(left_joints) if left_joints is not None else None
             self._last_right_state_joints = list(right_joints) if right_joints is not None else None
@@ -696,12 +779,32 @@ class TianjiArmControllerNode(Node):
 
     # -------------------- TF utilities --------------------
 
+    def _spin_tf(self):
+        try:
+            self._tf_executor.spin()
+        except (ExternalShutdownException, RCLError):
+            pass
+
+    def _initialization_should_abort(self):
+        return (self._shutdown_requested.is_set()
+                or not rclpy.ok(context=self.context) or not self._trackers_ready())
+
+    def _trackers_ready(self) -> bool:
+        return all(self._lookup_transform(parent, child) is not None for parent, child in (
+            ("left_chest", "tianji_left"), ("right_chest", "tianji_right"),
+            ("left_chest", "left_arm"), ("right_chest", "right_arm")))
+
     def _lookup_transform(self, from_frame: str, to_frame: str) -> Optional[np.ndarray]:
         try:
             tf = self.tf_buffer.lookup_transform(from_frame, to_frame, rclpy.time.Time())
-            return self._transform_to_matrix(tf)
+            stamp = rclpy.time.Time.from_msg(tf.header.stamp)
+            age = (self.get_clock().now() - stamp).nanoseconds / 1e9
+            if not 0.0 <= age <= self._tracker_timeout:
+                return None
+            matrix = self._transform_to_matrix(tf)
+            return matrix if np.isfinite(matrix).all() else None
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException):
+                tf2_ros.ExtrapolationException, ValueError, TypeError):
             return None
 
     @staticmethod
@@ -722,8 +825,17 @@ class TianjiArmControllerNode(Node):
 
     def shutdown(self):
         self.get_logger().info("Shutting down...")
-        if hasattr(self, 'controller'):
-            self.controller.disable_and_release()
+        self._shutdown_requested.set()
+        try:
+            if hasattr(self, 'controller'):
+                self.controller.disable_and_release()
+        finally:
+            if hasattr(self, '_tf_executor'):
+                self._tf_executor.shutdown(timeout_sec=2.0)
+                self._tf_thread.join(timeout=2.0)
+                self._tf_executor.remove_node(self._tf_node)
+                self.tf_listener.unregister()
+                self._tf_node.destroy_node()
         self.get_logger().info("Exited cleanly")
 
 

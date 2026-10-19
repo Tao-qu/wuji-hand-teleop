@@ -11,6 +11,7 @@ Design goals:
   avoid flicker.
 """
 
+import math
 import threading
 import time
 from collections import deque
@@ -20,7 +21,9 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 HAND_FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
-HAND_JOINTS = ['MCP', 'PIP', 'DIP', 'Tip']
+HAND_JOINTS = ['S1', 'S2', 'S3', 'S4']
+
+from .hand2_support import JOINT_LABELS
 
 from .arm_constants import INIT_LEFT, INIT_RIGHT
 
@@ -48,7 +51,10 @@ class JointDisplayPanel(QGroupBox):
         # Hand-joint caches (20 joints per hand).
         self._hand_joints = {"left": None, "right": None}
         self._hand_msg_time = {"left": 0.0, "right": 0.0}
-        self._hand_joint_idx = 0  # default MCP (0=MCP, 1=PIP, 2=DIP, 3=Tip)
+        self._hand_joint_idx = 0  # Firmware S1..S4, not landmark names.
+        self._hand_currents = {"left": None, "right": None}
+        self._hand_current_time = {"left": 0.0, "right": 0.0}
+        self._hand_quantity = "rad"
 
         # Cmd Hz monitor: sliding 1s window of command-message timestamps.
         # len(stamps within the last 1.0s) == measured publish rate (Hz).
@@ -61,6 +67,7 @@ class JointDisplayPanel(QGroupBox):
         self._hz_labels = {}
 
         self._build_ui()
+        self._on_hand_joint_changed(self._hand_joint_idx)
 
         self._render_timer = QTimer(self)
         self._render_timer.timeout.connect(self._refresh_display)
@@ -209,6 +216,11 @@ class JointDisplayPanel(QGroupBox):
         self._hand_joint_combo = QComboBox()
         self._hand_joint_combo.setFixedWidth(val_width)
         self._hand_joint_combo.addItems(HAND_JOINTS)
+        self._hand_joint_combo.setToolTip(
+            "S1: thumb CMC flex / fingers MCP flex\n"
+            "S2: thumb CMC abd / fingers MCP abd\n"
+            "S3: thumb MCP / fingers PIP\n"
+            "S4: thumb IP / fingers DIP")
         self._hand_joint_combo.setCurrentIndex(self._hand_joint_idx)
         self._hand_joint_combo.currentIndexChanged.connect(self._on_hand_joint_changed)
         self._hand_joint_combo.setStyleSheet(_combo_style)
@@ -220,9 +232,13 @@ class JointDisplayPanel(QGroupBox):
             lbl.setStyleSheet("color: #888; font-size: 10px; font-weight: bold;")
             row.addWidget(lbl)
         # Pad to align with the arm row (combo + 5 fingers = 6, arm has 7 columns).
-        sp = QLabel("")
-        sp.setFixedWidth(val_width)
-        row.addWidget(sp)
+        self._hand_quantity_combo = QComboBox()
+        self._hand_quantity_combo.setFixedWidth(val_width)
+        self._hand_quantity_combo.addItems(["rad", "A"])
+        self._hand_quantity_combo.setStyleSheet(_combo_style)
+        self._hand_quantity_combo.setToolTip("Hand position (rad) or motor current (A). Current is not torque.")
+        self._hand_quantity_combo.currentTextChanged.connect(self._on_hand_quantity_changed)
+        row.addWidget(self._hand_quantity_combo)
         row.addStretch()
         parent_layout.addLayout(row)
 
@@ -261,6 +277,12 @@ class JointDisplayPanel(QGroupBox):
 
     def _on_hand_joint_changed(self, index):
         self._hand_joint_idx = index
+        for labels in (self._left_hand_labels, self._right_hand_labels):
+            for finger, label in enumerate(labels):
+                label.setToolTip(JOINT_LABELS[0 if finger == 0 else 1][index])
+
+    def _on_hand_quantity_changed(self, quantity):
+        self._hand_quantity = quantity
 
     # -------------------- Public API --------------------
 
@@ -276,6 +298,12 @@ class JointDisplayPanel(QGroupBox):
         with self._lock:
             self._hand_joints[side] = list(positions[:20]) if len(positions) >= 20 else list(positions)
             self._hand_msg_time[side] = time.monotonic()
+
+    def update_hand_currents(self, side: str, currents: list):
+        """Cache motor current in amps from diagnostics, never JointState.effort."""
+        with self._lock:
+            self._hand_currents[side] = list(currents)
+            self._hand_current_time[side] = time.monotonic()
 
     def record_hz(self, key: str):
         """Record one command-message arrival (called from ROS2 callbacks).
@@ -340,19 +368,25 @@ class JointDisplayPanel(QGroupBox):
                     self._set_label_state(lbl, "--", self.STYLE_IDLE)
 
         # Hand-joint angles: selected joint type x 5 fingers.
-        joint_offset = self._hand_joint_idx  # 0=MCP, 1=PIP, 2=DIP, 3=Tip
+        joint_offset = self._hand_joint_idx  # S1..S4 in firmware order
         for side, labels in [("left", self._left_hand_labels), ("right", self._right_hand_labels)]:
             with self._lock:
-                hand_pos = self._hand_joints[side]
-                hand_time = self._hand_msg_time[side]
+                if self._hand_quantity == "A":
+                    hand_pos = self._hand_currents[side]
+                    hand_time = self._hand_current_time[side]
+                else:
+                    hand_pos = self._hand_joints[side]
+                    hand_time = self._hand_msg_time[side]
             display_positions, style = self._arm_feedback_state(hand_pos, hand_time, now)
+            if style == self.STYLE_ZERO:
+                style = self.STYLE_NORMAL  # Zero is a valid hand pose/current.
             if display_positions is None:
                 for lbl in labels:
                     self._set_label_state(lbl, "--", style)
             else:
                 for finger_idx, lbl in enumerate(labels):
                     idx = finger_idx * 4 + joint_offset  # 4 joints per finger
-                    if idx < len(display_positions):
+                    if idx < len(display_positions) and math.isfinite(display_positions[idx]):
                         self._set_label_state(lbl, f"{display_positions[idx]:.2f}", style)
                     else:
                         self._set_label_state(lbl, "--", self.STYLE_IDLE)

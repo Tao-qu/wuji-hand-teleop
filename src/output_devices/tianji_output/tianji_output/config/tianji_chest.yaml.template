@@ -7,3 +7,15 @@ robot_ip: "192.168.1.190"
 init_joints:
   left:  [55.0, -65.0, -70.0, -60.0, 60.0, 0.0, 0.0]
   right: [-55.0, -65.0, 70.0, -60.0, -60.0, 0.0, 0.0]
+
+# Preserve cabinet payload for initial integration. Switch to "configured"
+# only after measuring the complete hand + adapter + cable assembly.
+# Then supply independent left/right arrays:
+# [mass_kg, com_x_mm, com_y_mm, com_z_mm, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
+# Inertia units are kg*mm^2. No model nominal mass is imposed automatically.
+tool_dynamics:
+  source: controller
+
+# IK targets the arm flange by default. Optional tool_transforms.left/right
+# are rigid 4x4 flange-to-target matrices with translation in millimetres.
+# Apply a mounting offset here OR in the target TF chain, never both.

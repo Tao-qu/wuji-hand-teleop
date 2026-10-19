@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Scan Wuji Hand USB serial numbers and update local hardware YAML."""
+"""Discover Hand 2 devices, verify identity read-only, and preview SN edits."""
 
 from __future__ import annotations
 
 import difflib
 import io
-import re
-import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -20,6 +18,8 @@ from PyQt5.QtWidgets import (
 )
 
 from ament_index_python.packages import get_package_share_directory
+
+from .hand2_support import scan_hand2
 
 LogCallback = Callable[[str], None]
 
@@ -120,55 +120,22 @@ def _dump_to_string(data, yaml_handle) -> str:
 # -------------------- Scanners --------------------
 
 class WujiHandScanner:
-    """Wuji Hand SNs via `lsusb -v -d 0483:2000`."""
-
-    USB_VID = "0483"
-    USB_PID = "2000"
+    """Use official SDK network discovery and read-only device identification."""
 
     @classmethod
     def scan(cls, log: LogCallback) -> List[dict]:
         try:
-            result = subprocess.run(
-                ["lsusb", "-v", "-d", f"{cls.USB_VID}:{cls.USB_PID}"],
-                capture_output=True, text=True, timeout=5,
-            )
-        except FileNotFoundError:
-            log("Wuji Hand scan: lsusb not found (install usbutils)")
-            return []
-        except subprocess.TimeoutExpired:
-            log("Wuji Hand scan: lsusb timed out (5s)")
-            return []
-        except Exception as e:
-            log(f"Wuji Hand scan failed: {e}")
-            return []
-
-        devices: List[dict] = []
-        current_bus = ""
-        current_device = ""
-        for line in result.stdout.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("Bus ") and "Device " in stripped:
-                # e.g. "Bus 003 Device 005: ID 0483:2000 ..."
-                parts = stripped.split()
-                if len(parts) >= 4:
-                    current_bus = parts[1]
-                    current_device = parts[3].rstrip(":")
-            if "iSerial" in stripped:
-                parts = stripped.split()
-                if len(parts) >= 3:
-                    sn = parts[-1]
-                    if sn and sn != "0":
-                        devices.append({
-                            "sn": sn,
-                            "bus": current_bus,
-                            "device": current_device,
-                        })
-        return devices
+            return scan_hand2(log)
+        except ImportError:
+            log("Wuji Hand 2 scan: install the pinned wuji-sdk Python package")
+        except Exception as exc:
+            log(f"Wuji Hand 2 discovery failed: {exc}")
+        return []
 
 
 def _suggest_side(device: dict, kind: str) -> Optional[str]:
-    # Hand serials do not encode handedness; let the operator bind each hand.
-    return None
+    """Only a verified hardware response may assign a device side."""
+    return device.get("side") if device.get("verified") else None
 
 
 # -------------------- Save-to-YAML dialog --------------------
@@ -256,6 +223,11 @@ class SaveToYamlDialog(QDialog):
             self._confirm_btn.setEnabled(False)
             return
 
+        other_key = "right_hand" if side_key == "left_hand" else "left_hand"
+        if str((data.get(other_key) or {}).get("serial_number", "")) == self._sn:
+            self._diff_view.setPlainText("ERROR: this serial number is already bound to the other hand.")
+            self._confirm_btn.setEnabled(False)
+            return
         section["serial_number"] = self._sn
         self._new_data = data
         self._new_text = _dump_to_string(data, self._yaml_handle)
@@ -275,6 +247,8 @@ class SaveToYamlDialog(QDialog):
 
     def _on_confirm(self) -> None:
         try:
+            if self._path.read_text(encoding="utf-8") != self._old_text:
+                raise RuntimeError("Configuration changed since preview; close and reopen this edit.")
             _dump_yaml(self._path, self._new_data, self._yaml_handle)
         except Exception as e:
             QMessageBox.critical(self, "Write failed", f"Could not write YAML:\n{e}")
@@ -287,8 +261,7 @@ class SaveToYamlDialog(QDialog):
 # -------------------- Main scan dialog --------------------
 
 class ScanSNDialog(QDialog):
-    """Modal dialog: run both scanners in a background thread, then show
-    per-device Save-as-left / Save-as-right buttons."""
+    """Discover Hand 2 devices in a worker and show verified side bindings."""
 
     _results_signal = pyqtSignal(list)
 
@@ -307,7 +280,7 @@ class ScanSNDialog(QDialog):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(10, 10, 10, 10)
         self._layout.setSpacing(8)
-        self._status = QLabel("Scanning Wuji Hand (USB)...")
+        self._status = QLabel("Scanning Wuji Hand 2 (Ethernet, read-only)...")
         self._layout.addWidget(self._status)
 
         # Scrollable inner area — keeps the dialog at a sane proportion even
@@ -373,7 +346,7 @@ class ScanSNDialog(QDialog):
         QTimer.singleShot(60, self._start_scan)
 
     def _start_scan(self) -> None:
-        self._status.setText("Scanning Wuji Hand (USB)...")
+        self._status.setText("Scanning Wuji Hand 2 (Ethernet, read-only)...")
         self._rescan_btn.setEnabled(False)
         self._clear_results()
         self._install_loading_widget()
@@ -423,7 +396,10 @@ class ScanSNDialog(QDialog):
 
     def _scan_worker(self) -> None:
         hands = WujiHandScanner.scan(self._log)
-        self._results_signal.emit(hands)
+        try:
+            self._results_signal.emit(hands)
+        except RuntimeError:
+            pass  # The operator closed the dialog while discovery was running.
 
     def _clear_results(self) -> None:
         while self._results_host_layout.count():
@@ -440,13 +416,13 @@ class ScanSNDialog(QDialog):
         self._clear_results()
 
         self._status.setText(
-            f"Found {len(hands)} Wuji Hand(s).")
+            f"Found {len(hands)} Wuji Hand 2 device(s); no motors enabled.")
         self._rescan_btn.setEnabled(True)
 
-        hand_yaml = _resolve_config_path("wujihand_output", "wujihand_ik.yaml")
+        hand_yaml = _resolve_config_path("wujihand_output", "hand2.yaml")
 
         self._results_host_layout.addWidget(self._build_group(
-            "Wuji Hand", hands, hand_yaml, "hand",
+            "Wuji Hand 2", hands, hand_yaml, "hand",
             left_key="left_hand", right_key="right_hand"))
 
     _SECTION_CSS = "color: #888; font-size: 9px; font-weight: bold; letter-spacing: 1px;"
@@ -524,6 +500,9 @@ class ScanSNDialog(QDialog):
                 extra_parts.append(f"addr={d['address']}")
             if d.get("transport"):
                 extra_parts.append(f"tx={d['transport']}")
+            for key in ("side", "firmware", "hardware", "error"):
+                if d.get(key):
+                    extra_parts.append(f"{key}={d[key]}")
             extra_text = ", ".join(extra_parts)
 
             suggested = _suggest_side(d, kind)
@@ -550,6 +529,7 @@ class ScanSNDialog(QDialog):
             if extra_text:
                 extra_lbl = QLabel(f"      {extra_text}")
                 extra_lbl.setStyleSheet(self._MUTED_CSS)
+                extra_lbl.setWordWrap(True)
                 v.addWidget(extra_lbl)
 
             # Save buttons — wide enough to always fit; suggested side gets
@@ -571,6 +551,8 @@ class ScanSNDialog(QDialog):
                     ("Save as left", left_key, "left"),
                     ("Save as right", right_key, "right")):
                 btn = QPushButton(label_text)
+                btn.setEnabled(bool(d.get("verified")) and side_tag == suggested)
+                btn.setToolTip("Only the verified hardware side can be saved.")
                 btn.setMinimumWidth(120)
                 btn.setFixedHeight(26)
                 btn.setStyleSheet(

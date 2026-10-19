@@ -3,7 +3,7 @@
 <package format="3">
   <name>wujihand_output</name>
   <version>0.1.0</version>
-  <description>Wuji hand hardware interface library — provides the WujiHandController control interface</description>
+  <description>Wuji Hand 2 official retargeting and ROS bridge command interface</description>
   <maintainer email="your_email@example.com">wuji</maintainer>
   <license>MIT</license>
 
@@ -11,6 +11,7 @@
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
 
   <exec_depend>python3-numpy</exec_depend>
 

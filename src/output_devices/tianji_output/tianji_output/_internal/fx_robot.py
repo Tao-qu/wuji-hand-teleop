@@ -299,15 +299,18 @@ def structure2dict(dcss):
     return result
 
 class Marvin_Robot:
-    def __init__(self):
+    def __init__(self, library_path=None):
         """Initialize robot control class"""
         import sys
         print(f'user platform: {sys.platform}')
+        override = library_path or os.environ.get('TIANJI_SDK_LIBRARY')
+        if override and not Path(override).expanduser().is_file():
+            raise FileNotFoundError(f'Tianji SDK library does not exist: {override}')
         if sys.platform=='win32':
-            lib_path = str(_lib_dir / 'libMarvinSDK.dll')
+            lib_path = str(Path(override).expanduser() if override else _lib_dir / 'libMarvinSDK.dll')
             self.robot = ctypes.WinDLL(lib_path)
         else:
-            lib_path = str(_lib_dir / 'libMarvinSDK.so')
+            lib_path = str(Path(override).expanduser() if override else _lib_dir / 'libMarvinSDK.so')
             self.robot = ctypes.CDLL(lib_path)
         print(f'Loaded library from: {lib_path}')
         self.ErrorCode = None
@@ -334,7 +337,23 @@ class Marvin_Robot:
             connect(robot_ip='192.168.1.190')
         '''
         ip1, ip2, ip3, ip4 = self._convert_ip(robot_ip)
-        return self.robot.OnLinkTo(ip1, ip2, ip3, ip4)
+        self.robot.OnLinkTo.argtypes = [ctypes.c_ubyte] * 4
+        self.robot.OnLinkTo.restype = ctypes.c_bool
+        connected = self.robot.OnLinkTo(ip1, ip2, ip3, ip4)
+        if connected:
+            # Older SDKs only bind a local UDP socket in OnLinkTo. A read-only
+            # parameter request announces the feedback destination; clearing
+            # faults is neither a handshake nor a connection test. The driver
+            # must still verify advancing feedback for BOTH arms afterwards.
+            self.robot.OnGetIntPara.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_long)]
+            self.robot.OnGetIntPara.restype = ctypes.c_long
+            value = ctypes.c_long(0)
+            # Native API inspects all 30 bytes, including byte 29, and writes
+            # a C long (8 bytes on Linux), rather than a 32-bit Python c_int.
+            name = ctypes.create_string_buffer(b'VERSION', 30)
+            result = self.robot.OnGetIntPara(name, ctypes.byref(value))
+            self.controller_version = value.value if result == 0 and value.value > 0 else None
+        return connected
 
 
     def subscribe(self,dcss):
@@ -416,7 +435,7 @@ class Marvin_Robot:
                 # print(f"parameter:{paraName}, float parameters={result.value}")
                 return re_flag,result.value
             elif type=='int':
-                result = ctypes.c_int(0)
+                result = ctypes.c_long(0)
                 self.robot.OnGetIntPara.restype = ctypes.c_long
                 re_flag=self.robot.OnGetIntPara(param_buf, ctypes.byref(result))
                 # print(f"parameter:{paraName}, int parameters={result.value}")
@@ -1367,4 +1386,3 @@ fault_code_dict = {
     "0xFF90": "2nd speed following error too large",
     "0xFF91": "Drive internal error 2",
 }
-

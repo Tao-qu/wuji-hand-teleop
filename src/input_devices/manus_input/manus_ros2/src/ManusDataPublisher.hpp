@@ -4,11 +4,14 @@
 #include "ClientPlatformSpecific.hpp"
 #include "ManusSDK.h"
 #include <mutex>
+#include <chrono>
+#include <cstdint>
 #include <vector>
 #include <memory>
 #include <deque>
 
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/header.hpp"
 #include "manus_ros2_msgs/msg/manus_ergonomics.hpp"
 #include "manus_ros2_msgs/msg/manus_glove.hpp"
 #include "manus_ros2_msgs/msg/manus_raw_node.hpp"
@@ -48,6 +51,9 @@ class ClientRawSkeleton
 public:
     RawSkeletonInfo info;
     std::vector<SkeletonNode> nodes;
+    std_msgs::msg::Header header;
+    std::chrono::steady_clock::time_point received_at;
+    uint64_t sequence = 0;
 };
 
 /// @brief Used to store all the skeleton data coming from the estimation system
@@ -131,6 +137,8 @@ protected:
     std::mutex m_RawSkeletonMutex;
     std::map<uint32_t, ClientRawSkeleton> m_GloveDataMap;
     NodeInfo* m_NodeInfo = nullptr;
+    std::map<uint32_t, uint64_t> m_LastPublishedSequence;
+    double m_SourceTimeout = 0.20;
     
     //Add raw sensor data
     std::mutex m_RawSensorDataMutex;

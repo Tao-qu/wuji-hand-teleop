@@ -16,7 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/ManusGlove.msg
   msg/ManusRawNode.msg
   msg/ManusErgonomics.msg
-  DEPENDENCIES geometry_msgs)
+  DEPENDENCIES geometry_msgs std_msgs)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
