@@ -544,6 +544,29 @@ def test_impedance_stages_parameters_before_state_and_seeds_latest_measured_pose
     assert all(args['velRatio'] == args['AccRatio'] == 60 for name, args in first if name == 'set_vel_acc')
 
 
+@pytest.mark.parametrize('argument', ['velRatio', 'AccRatio'])
+@pytest.mark.parametrize('invalid', [0, -1, 101, True, 10.0, float('nan'), float('inf'), '10', None])
+def test_impedance_rejects_invalid_ratios_before_any_device_access(argument, invalid):
+    driver = SimpleNamespace(robot=Mock(), _feedback_guard=Mock(), logger=Mock())
+    with pytest.raises(ValueError, match='integer percentage'):
+        TianjiChestDriver.set_impedance_mode(driver, **{argument: invalid})
+    assert driver.robot.mock_calls == []
+    driver._feedback_guard.observe.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['joint', 'cart'])
+def test_impedance_explicit_ratios_reach_both_arms_without_changing_mode_sequence(mode):
+    robot = ModeCommandSdk()
+    driver = mode_test_driver(robot)
+    with patch('tianji_output.tianji_chest_driver.guarded_wait'):
+        TianjiChestDriver.set_impedance_mode(driver, mode=mode, velRatio=10, AccRatio=8)
+    ratios = [arguments for method, arguments in robot.calls if method == 'set_vel_acc']
+    assert ratios == [{'arm': 'A', 'velRatio': 10, 'AccRatio': 8},
+                      {'arm': 'B', 'velRatio': 10, 'AccRatio': 8}]
+    assert len(robot.calls) == 14
+    driver._poll_arm_state_after_switch.assert_called_once()
+
+
 @pytest.mark.parametrize('when', ['before_parameters', 'before_enable'])
 @pytest.mark.parametrize('state,error', [(100, 0), (100, 6), (1, 6), (101, 0)])
 def test_impedance_snapshot_fault_or_transition_cannot_reach_enable(when, state, error):

@@ -371,6 +371,8 @@ class Marvin_Robot:
         :return:
             int: Disconnect status code 1: True; 0: False
         '''
+        self.robot.OnRelease.argtypes = []
+        self.robot.OnRelease.restype = ctypes.c_bool
         return self.robot.OnRelease()
 
     def SDK_version(self):
@@ -378,6 +380,8 @@ class Marvin_Robot:
         :return:
             long: SDK version
         '''
+        self.robot.OnGetSDKVersion.argtypes = []
+        self.robot.OnGetSDKVersion.restype = ctypes.c_long
         return self.robot.OnGetSDKVersion()
 
     def update_SDK(self, sdk_path: str):
@@ -765,7 +769,7 @@ class Marvin_Robot:
         Joints 1-7 stiffness should not exceed 2
         Joints 1-7 damping between 0-1
         :param K: list(7,1). Stiffness Nm/degree.Set the force for each axis as stiffness coefficient. e.g. K=[2,2,2,1,1,1,1], axes 1-3 have 2N as stiffness coefficient for control computation, axes 4-7 have 1N as stiffness coefficient for control computation.
-        :param D: list(7,1). damping Nm / (degrees / second). Set the damping coefficient for each axis.
+        :param D: list(7,1). Dimensionless damping ratio for each axis, in [0, 1], per the vendor control API.
         :return:
             int : 1: True,  2: False
         '''

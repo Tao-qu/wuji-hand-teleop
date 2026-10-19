@@ -313,7 +313,8 @@ class TianjiChestDriver:
 
     # ==================== Impedance mode ====================
 
-    def set_impedance_mode(self, mode='joint', K=None, D=None, should_abort=None):
+    def set_impedance_mode(self, mode='joint', K=None, D=None, should_abort=None,
+                           *, velRatio=60, AccRatio=60):
         """
         Set dual-arm impedance mode.
 
@@ -325,9 +326,16 @@ class TianjiChestDriver:
             mode: 'joint' or 'cart'.
             K: stiffness list (7 elements).
             D: damping list (7 elements).
+            velRatio: integer joint-following velocity percentage, 1..100.
+            AccRatio: integer joint-following acceleration percentage, 1..100.
+                Defaults preserve production behavior; vendor examples use
+                10/10 for commissioning. These are not measured-speed guards.
         """
         if mode not in ('cart', 'joint'):
             raise ValueError('impedance mode must be cart or joint')
+        for name, value in (('velRatio', velRatio), ('AccRatio', AccRatio)):
+            if type(value) is not int or not 1 <= value <= 100:
+                raise ValueError(f'{name} must be an integer percentage in 1..100')
         check_motion_allowed(should_abort)
         _impedance_entry_pose(self.robot, self._feedback_guard)
         check_motion_allowed(should_abort)
@@ -337,9 +345,9 @@ class TianjiChestDriver:
 
             _checked_mode_command(self.robot, 'clear_set')
             _checked_mode_command(self.robot, 'set_cart_kd_params', arm='A', K=K, D=D, type=2)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=60, AccRatio=60)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=velRatio, AccRatio=AccRatio)
             _checked_mode_command(self.robot, 'set_cart_kd_params', arm='B', K=K, D=D, type=2)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=60, AccRatio=60)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=velRatio, AccRatio=AccRatio)
             _checked_mode_command(self.robot, 'send_cmd')
             guarded_wait(0.5, should_abort)
 
@@ -351,9 +359,9 @@ class TianjiChestDriver:
 
             _checked_mode_command(self.robot, 'clear_set')
             _checked_mode_command(self.robot, 'set_joint_kd_params', arm='A', K=K, D=D)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=60, AccRatio=60)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=velRatio, AccRatio=AccRatio)
             _checked_mode_command(self.robot, 'set_joint_kd_params', arm='B', K=K, D=D)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=60, AccRatio=60)
+            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=velRatio, AccRatio=AccRatio)
             _checked_mode_command(self.robot, 'send_cmd')
             guarded_wait(0.5, should_abort)
 
