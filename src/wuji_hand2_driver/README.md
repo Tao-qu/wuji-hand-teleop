@@ -56,5 +56,5 @@ or forced process termination; use the hardware emergency stop for those cases.
 Run tests without ROS or hardware:
 
 ```bash
-python3 -m pytest -q src/wuji_hand2_driver/test
+python3 tools/test_offline.py -q src/wuji_hand2_driver/test
 ```

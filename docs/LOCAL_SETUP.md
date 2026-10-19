@@ -84,7 +84,7 @@ python3 -m colcon build --symlink-install \
 source tools/env.sh
 python3 tools/check_environment.py --mode all
 python3 -m pip install pytest
-python3 -m pytest -q tests
+python3 tools/test_offline.py -q
 ```
 
 Load `tools/env.sh` in every new terminal. If the workspace path or interpreter changes, regenerate this project's `build/`, `install/`, and `log/` outputs and rebuild. Do not source an unrelated workspace over this one.

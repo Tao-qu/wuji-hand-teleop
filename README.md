@@ -129,13 +129,15 @@ Each hand has a persistent retargeting session in a separate process. MANUS cont
 source tools/env.sh
 python3 tools/check_environment.py --mode all
 python3 -m pip install pytest
-python3 -m pytest -q tests src/wuji_hand2_driver/test src/wuji_teleop_monitor/tests src/input_devices/manus_input/manus_ros2/tools/tests
+python3 tools/test_offline.py -q
 ros2 topic hz /left_hand/joint_states
 ros2 topic echo /left_hand/lifecycle_state
 ros2 topic echo /left_hand/diagnostics
 ```
 
 Environment checks and unit tests do not command hardware. Tests that use `RetargetSession` run the pure retargeting API without creating an SDK device manager. Successful software checks do not establish motor direction, real-world tracking quality, payload calibration, or full-system hardware acceptance.
+
+Use `tools/test_offline.py` for offline verification. It validates paths before pytest starts, fixes the root configuration even when invoked from another directory, and disables plugin autoload. Optional selectors are relative to the repository root, for example `python3 tools/test_offline.py -q tests/test_tianji_safety.py`. The root `pytest.ini` and collection hook provide additional restrictions, including disabling ROS launch collectors that can import sibling operational scripts. A direct pytest command can load directory `conftest.py` files before that hook runs or select a nested package's configuration, so it is not equivalent to the runner. Do not import operational scripts or put hardware actions at module scope: these checks are not a sandbox for deliberately imported code or an untrusted Python environment. The local incident and cleanup are recorded in the [hardware acceptance report](docs/HARDWARE_ACCEPTANCE_2026-10-19.md).
 
 Implementation follows the official [SDK Python retargeting examples](https://github.com/wuji-technology/wuji-sdk/tree/v2026.10.12/examples/python/retargeting), [Hand 2 examples](https://github.com/wuji-technology/wuji-sdk/tree/v2026.10.12/examples/python/wuji_hand_2), and [Hand 2.2 model](https://github.com/wuji-technology/wuji-description/tree/829c9aa27cb12c3a49d5b8d63c9869dd8f656702/hand2/hand2_2/body). See [documentation](docs/README.md) for the setup and wearing guides.
 
