@@ -41,6 +41,17 @@ The configuration tool copies missing templates and preserves existing local set
 
 The arm configuration defaults to `tool_dynamics.source: controller`: it reads and reuses the cabinet's existing payload values. This does **not** mean that the new hand assembly has been calibrated. After measuring each complete hand, adapter, and cable assembly, select `configured` and supply the independent left/right values described in the template. Tool transforms use millimetres; Tracker offsets use metres. Apply a geometric tool offset in the IK configuration or target TF chain once.
 
+## Preview inputs and targets without actuator connections
+
+```bash
+source tools/env.sh
+ROS_DOMAIN_ID=71 ros2 launch wuji_teleop_bringup wuji_preview.launch.py
+```
+
+This separate entrypoint starts MANUS with the bundled TPX profiles, the configured five Trackers, official Hand 2 target models, and RViz. It has no hand/arm driver or enable service. The side-by-side models show requested finger geometry, not actual hands or calibrated mounting poses; Tracker axes are displayed without arm IK. Preview traffic uses `/preview/*` topics and an explicitly nonzero ROS domain. Diagnostics and visible status labels distinguish fresh input from stale/missing input; the model can retain its last pose when input expires. Close RViz or press Ctrl-C to stop the preview before normal operation. Use `start_inputs:=false enable_rviz:=false` for a graph check without input-device readers.
+
+See the [attended acceptance runbook](docs/ATTENDED_ACCEPTANCE.md) and [current hardware record](docs/HARDWARE_ACCEPTANCE_2026-10-19.md). The failed right-hand following and right-arm torque transition are not resolved by a successful preview.
+
 ## Start processes, then enable motors
 
 Load the environment in every terminal:

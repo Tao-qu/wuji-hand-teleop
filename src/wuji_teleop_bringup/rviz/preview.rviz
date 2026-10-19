@@ -1,0 +1,79 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ''
+  Displays:
+    - Class: rviz_default_plugins/MarkerArray
+      Name: LIVE STATUS - stale models retain last target
+      Enabled: true
+      Marker Topic:
+        Value: /preview/status_markers
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Namespaces:
+        preview_status: true
+    - Class: rviz_default_plugins/Grid
+      Name: Display layout grid
+      Enabled: true
+      Cell Size: 0.1
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/RobotModel
+      Name: Left TARGET (not measured)
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /preview/left/robot_description
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      TF Prefix: preview/left
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz_default_plugins/RobotModel
+      Name: Right TARGET (not measured)
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /preview/right/robot_description
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      TF Prefix: preview/right
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz_default_plugins/TF
+      Name: Five Tracker axes and preview model frames
+      Enabled: true
+      Frame Timeout: 0.25
+      Marker Scale: 0.12
+      Show Axes: true
+      Show Names: true
+      Show Arrows: false
+      Frames:
+        All Enabled: true
+  Global Options:
+    Fixed Frame: world
+    Background Color: 40; 40; 45
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.0
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1.1
+      Pitch: 0.35
+      Yaw: 4.7
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Width: 1200
+  Height: 850

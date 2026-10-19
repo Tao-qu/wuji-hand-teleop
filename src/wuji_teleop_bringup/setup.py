@@ -18,6 +18,7 @@ setup(
         # Install config files
         (os.path.join('share', package_name, 'config'),
             glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools', 'pyyaml'],
     zip_safe=True,
@@ -26,6 +27,8 @@ setup(
     description='Launch files for Wuji Hand and Tianji Arm teleoperation',
     license='MIT',
     entry_points={
-        'console_scripts': [],
+        'console_scripts': [
+            'hand2_preview = wuji_teleop_bringup.hand2_preview:main',
+        ],
     },
 )
