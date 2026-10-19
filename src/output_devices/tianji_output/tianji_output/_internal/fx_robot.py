@@ -495,19 +495,26 @@ class Marvin_Robot:
         except Exception as e:
             print("ERROR:",e)
 
+    def _call_bool_command(self, name, argument_types, *arguments):
+        """Bind staged command signatures from MarvinSDK.h (C++ bool return)."""
+        function = getattr(self.robot, name)
+        function.argtypes = argument_types
+        function.restype = ctypes.c_bool
+        return function(*arguments)
+
     def clear_set(self):
         '''Clear before sending command
         :return:
             int: 1: True; 0: Flase
         '''
-        return self.robot.OnClearSet()
+        return self._call_bool_command('OnClearSet', [])
 
     def send_cmd(self):
         '''Send command
         :return:
             int: 1: True; 0: Flase
         '''
-        return self.robot.OnSetSend()
+        return self._call_bool_command('OnSetSend', [])
 
     def collect_data(self,targetNum:int,targetID:list[int],recordNum:int):
         '''Collect data
@@ -685,9 +692,9 @@ class Marvin_Robot:
         try:
             state_int = ctypes.c_int(state)
             if arm=="A":
-                return self.robot.OnSetTargetState_A(state_int)
+                return self._call_bool_command('OnSetTargetState_A', [ctypes.c_int], state_int)
             elif arm=='B':
-                return self.robot.OnSetTargetState_B(state_int)
+                return self._call_bool_command('OnSetTargetState_B', [ctypes.c_int], state_int)
         except Exception as e:
             print(f'ERROR:{e}')
 
@@ -704,9 +711,9 @@ class Marvin_Robot:
         try:
             type_int = ctypes.c_int(type)
             if arm=='A':
-                return self.robot.OnSetImpType_A(type_int)
+                return self._call_bool_command('OnSetImpType_A', [ctypes.c_int], type_int)
             elif arm == 'B':
-                return self.robot.OnSetImpType_B(type_int)
+                return self._call_bool_command('OnSetImpType_B', [ctypes.c_int], type_int)
         except Exception as e:
             print(f'ERROR:{e}')
 
@@ -722,9 +729,11 @@ class Marvin_Robot:
             velRatio_int = ctypes.c_int(velRatio)
             AccRatio_int = ctypes.c_int(AccRatio)
             if arm=='A':
-                return self.robot.OnSetJointLmt_A(velRatio_int, AccRatio_int)
+                return self._call_bool_command('OnSetJointLmt_A', [ctypes.c_int, ctypes.c_int],
+                                               velRatio_int, AccRatio_int)
             elif arm=='B':
-                return self.robot.OnSetJointLmt_B(velRatio_int, AccRatio_int)
+                return self._call_bool_command('OnSetJointLmt_B', [ctypes.c_int, ctypes.c_int],
+                                               velRatio_int, AccRatio_int)
         except Exception as e:
             print(f'ERROR:{e}')
 
@@ -769,9 +778,11 @@ class Marvin_Robot:
             d_double = ctypes.c_double * 7
             d_value = d_double(d0, d1, d2, d3, d4, d5, d6)
             if arm=="A":
-                return self.robot.OnSetJointKD_A(k_value, d_value)
+                return self._call_bool_command('OnSetJointKD_A', [ctypes.POINTER(ctypes.c_double)] * 2,
+                                               k_value, d_value)
             elif arm == "B":
-                return self.robot.OnSetJointKD_B(k_value, d_value)
+                return self._call_bool_command('OnSetJointKD_B', [ctypes.POINTER(ctypes.c_double)] * 2,
+                                               k_value, d_value)
         except Exception as e:
             print(f'ERROR:{e}')
 
@@ -797,9 +808,11 @@ class Marvin_Robot:
             d_value = d_double(d0, d1, d2, d3, d4, d5, d6)
             type_int = ctypes.c_int(type)
             if arm=="A":
-                return self.robot.OnSetCartKD_A(k_value, d_value, type_int)
+                return self._call_bool_command('OnSetCartKD_A',
+                    [ctypes.POINTER(ctypes.c_double)] * 2 + [ctypes.c_int], k_value, d_value, type_int)
             if arm == "B":
-                return self.robot.OnSetCartKD_B(k_value, d_value, type_int)
+                return self._call_bool_command('OnSetCartKD_B',
+                    [ctypes.POINTER(ctypes.c_double)] * 2 + [ctypes.c_int], k_value, d_value, type_int)
         except Exception as e:
             print(f'ERROR:{e}')
 
@@ -846,9 +859,11 @@ class Marvin_Robot:
             joints_double = ctypes.c_double * 7
             joints_value = joints_double(j0, j1, j2, j3, j4, j5, j6)
             if arm=='A':
-                return self.robot.OnSetJointCmdPos_A(joints_value )
+                return self._call_bool_command('OnSetJointCmdPos_A', [ctypes.POINTER(ctypes.c_double)],
+                                               joints_value)
             elif arm == 'B':
-                return self.robot.OnSetJointCmdPos_B(joints_value)
+                return self._call_bool_command('OnSetJointCmdPos_B', [ctypes.POINTER(ctypes.c_double)],
+                                               joints_value)
         except Exception as e:
             print(f'ERROR:{e}')
 

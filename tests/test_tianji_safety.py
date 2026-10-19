@@ -419,12 +419,89 @@ def test_mode_poll_observes_stop_before_another_sdk_read():
 
 @pytest.mark.parametrize('method', ['set_position_mode', 'set_impedance_mode'])
 def test_mode_timeout_cannot_report_success(method):
-    driver = SimpleNamespace(robot=Mock(), logger=Mock(),
+    robot = Mock()
+    for name in ('clear_set', 'set_joint_cmd_pose', 'set_state', 'set_vel_acc',
+                 'set_joint_kd_params', 'set_impedance_type', 'send_cmd'):
+        getattr(robot, name).return_value = True
+    driver = SimpleNamespace(robot=robot, logger=Mock(),
         get_current_joints=lambda: ([0] * 7, [0] * 7),
         _poll_arm_state_after_switch=Mock(return_value=(False, 'timeout')))
     with patch('tianji_output.tianji_chest_driver.guarded_wait'):
         with pytest.raises(RuntimeError, match='did not confirm'):
             getattr(TianjiChestDriver, method)(driver)
+
+
+class ModeCommandSdk:
+    """One serialized SDK stream, with an injected failed staged operation."""
+    def __init__(self, fail_at=None, result=0):
+        self.fail_at, self.result, self.calls = fail_at, result, []
+
+    def __getattr__(self, method):
+        def call(**arguments):
+            self.calls.append((method, arguments))
+            return self.result if len(self.calls) == self.fail_at else True
+        return call
+
+
+@pytest.mark.parametrize('method,mode,fail_at', [
+    (method, mode, step)
+    for method, mode, count in [('set_position_mode', None, 8),
+                                ('set_impedance_mode', 'joint', 14),
+                                ('set_impedance_mode', 'cart', 14)]
+    for step in range(1, count + 1)
+])
+def test_each_rejected_mode_stage_stops_without_sending_later_steps(method, mode, fail_at):
+    robot = ModeCommandSdk(fail_at)
+    driver = SimpleNamespace(robot=robot, logger=Mock(),
+        get_current_joints=lambda: ([10] * 7, [-10] * 7),
+        _poll_arm_state_after_switch=Mock(return_value=(True, '')))
+    with patch('tianji_output.tianji_chest_driver.guarded_wait'):
+        with pytest.raises(RuntimeError, match='was not accepted'):
+            getattr(TianjiChestDriver, method)(driver, **({'mode': mode} if mode else {}))
+    assert len(robot.calls) == fail_at
+    driver._poll_arm_state_after_switch.assert_not_called()
+
+
+@pytest.mark.parametrize('returned', [False, 0, None, -1, 2])
+@pytest.mark.parametrize('phase,fail_at', [('position', 5), ('impedance', 5), ('impedance', 14)])
+def test_unaccepted_mode_command_uses_existing_enable_rollback(returned, phase, fail_at):
+    robot = ModeCommandSdk(fail_at=fail_at, result=returned)
+    driver = SimpleNamespace(robot=robot, logger=Mock(),
+        get_current_joints=lambda: ([10] * 7, [-10] * 7),
+        _poll_arm_state_after_switch=Mock(return_value=(True, '')))
+    driver.set_position_mode = (MethodType(TianjiChestDriver.set_position_mode, driver)
+                               if phase == 'position' else Mock())
+    driver.set_impedance_mode = MethodType(TianjiChestDriver.set_impedance_mode, driver)
+    driver.set_standby = Mock()
+    driver.move_to_init = Mock(return_value=True)
+    node = cancellable_node(driver)
+    with patch('controller.tianji_arm_node.rclpy.ok', return_value=True), \
+         patch('tianji_output.tianji_chest_driver.guarded_wait'):
+        response = node._set_enabled_callback(SimpleNamespace(data=True), SimpleNamespace())
+    assert not response.success and 'was not accepted' in response.message
+    assert not node._arm_enabled
+    driver.set_standby.assert_called_once()
+    assert driver.move_to_init.call_count == (1 if phase == 'impedance' else 0)
+    node._arm_handoff_snapshot.assert_not_called()
+    assert all(call.args != (LIFECYCLE_READY,) for call in node._publish_lifecycle.call_args_list)
+
+
+@pytest.mark.parametrize('method,mode,count,target', [
+    ('set_position_mode', None, 8, 1),
+    ('set_impedance_mode', 'joint', 14, 3),
+    ('set_impedance_mode', 'cart', 14, 3),
+])
+def test_accepted_mode_batches_still_require_cabinet_confirmation(method, mode, count, target):
+    robot = ModeCommandSdk()
+    driver = SimpleNamespace(robot=robot, logger=Mock(),
+        get_current_joints=lambda: ([10] * 7, [-10] * 7),
+        _poll_arm_state_after_switch=Mock(return_value=(True, '')))
+    with patch('tianji_output.tianji_chest_driver.guarded_wait'):
+        getattr(TianjiChestDriver, method)(driver, **({'mode': mode} if mode else {}))
+    assert len(robot.calls) == count
+    assert driver._poll_arm_state_after_switch.call_args.kwargs['target_state'] == target
+    holds = [args['joints'] for name, args in robot.calls if name == 'set_joint_cmd_pose']
+    assert holds == [[10] * 7, [-10] * 7]
 
 
 def run_settle_feedback(feedback, timeout=15.0):

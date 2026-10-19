@@ -37,6 +37,19 @@ from .feedback_guard import (ArmJointLimits, DualArmFeedbackGuard, check_motion_
                              guarded_wait, joint_vector, pose_mm, confirm_standby, disable_and_release)
 
 
+def _checked_mode_command(robot, method, **arguments):
+    """Reject an unaccepted native bool command before staging any later step.
+
+    OnClearSet/setters/OnSetSend can return false while the SDK send buffer
+    is busy. A true return only confirms SDK acceptance; the mode poll still
+    has to confirm cabinet state. Do not retry a partially staged mode batch.
+    """
+    result = getattr(robot, method)(**arguments)
+    if result is not True and not (type(result) is int and result == 1):
+        arm = f" arm={arguments['arm']}" if 'arm' in arguments else ''
+        raise RuntimeError(f'Tianji mode command {method}{arm} was not accepted: {result!r}')
+
+
 class TianjiChestDriver:
     """
     Tianji dual-arm Chest-frame driver.
@@ -305,12 +318,12 @@ class TianjiChestDriver:
             K = K or [8000, 8000, 8000, 100, 100, 100, 20]
             D = D or [0.3, 0.3, 0.3, 0.4, 0.4, 0.4, 0.4]
 
-            self.robot.clear_set()
-            self.robot.set_cart_kd_params(arm='A', K=K, D=D, type=2)
-            self.robot.set_cart_kd_params(arm='B', K=K, D=D, type=2)
-            self.robot.set_impedance_type(arm='A', type=2)
-            self.robot.set_impedance_type(arm='B', type=2)
-            self.robot.send_cmd()
+            _checked_mode_command(self.robot, 'clear_set')
+            _checked_mode_command(self.robot, 'set_cart_kd_params', arm='A', K=K, D=D, type=2)
+            _checked_mode_command(self.robot, 'set_cart_kd_params', arm='B', K=K, D=D, type=2)
+            _checked_mode_command(self.robot, 'set_impedance_type', arm='A', type=2)
+            _checked_mode_command(self.robot, 'set_impedance_type', arm='B', type=2)
+            _checked_mode_command(self.robot, 'send_cmd')
             guarded_wait(0.5, should_abort)
 
             self.logger.info(f"Dual-arm Cartesian impedance mode K={K}")
@@ -319,12 +332,12 @@ class TianjiChestDriver:
             K = K or [2, 2, 2, 1.6, 1, 1, 1]
             D = D or [0.3, 0.3, 0.3, 0.2, 0.2, 0.2, 0.2]
 
-            self.robot.clear_set()
-            self.robot.set_joint_kd_params(arm='A', K=K, D=D)
-            self.robot.set_joint_kd_params(arm='B', K=K, D=D)
-            self.robot.set_impedance_type(arm='A', type=1)
-            self.robot.set_impedance_type(arm='B', type=1)
-            self.robot.send_cmd()
+            _checked_mode_command(self.robot, 'clear_set')
+            _checked_mode_command(self.robot, 'set_joint_kd_params', arm='A', K=K, D=D)
+            _checked_mode_command(self.robot, 'set_joint_kd_params', arm='B', K=K, D=D)
+            _checked_mode_command(self.robot, 'set_impedance_type', arm='A', type=1)
+            _checked_mode_command(self.robot, 'set_impedance_type', arm='B', type=1)
+            _checked_mode_command(self.robot, 'send_cmd')
             guarded_wait(0.5, should_abort)
 
             self.logger.info(f"Dual-arm joint impedance mode K={K}")
@@ -333,14 +346,14 @@ class TianjiChestDriver:
         check_motion_allowed(should_abort)
         hold_left, hold_right = self.get_current_joints()
         check_motion_allowed(should_abort)
-        self.robot.clear_set()
-        self.robot.set_joint_cmd_pose(arm='A', joints=hold_left)
-        self.robot.set_joint_cmd_pose(arm='B', joints=hold_right)
-        self.robot.set_state(arm='A', state=3)
-        self.robot.set_state(arm='B', state=3)
-        self.robot.set_vel_acc(arm='A', velRatio=60, AccRatio=60)
-        self.robot.set_vel_acc(arm='B', velRatio=60, AccRatio=60)
-        self.robot.send_cmd()
+        _checked_mode_command(self.robot, 'clear_set')
+        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=hold_left)
+        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=hold_right)
+        _checked_mode_command(self.robot, 'set_state', arm='A', state=3)
+        _checked_mode_command(self.robot, 'set_state', arm='B', state=3)
+        _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=60, AccRatio=60)
+        _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=60, AccRatio=60)
+        _checked_mode_command(self.robot, 'send_cmd')
 
         ok, diag = self._poll_arm_state_after_switch(
             target_state=3, timeout=5.0, should_abort=should_abort)
@@ -694,14 +707,14 @@ class TianjiChestDriver:
         check_motion_allowed(should_abort)
         hold_left, hold_right = self.get_current_joints()
         check_motion_allowed(should_abort)
-        self.robot.clear_set()
-        self.robot.set_joint_cmd_pose(arm='A', joints=hold_left)
-        self.robot.set_joint_cmd_pose(arm='B', joints=hold_right)
-        self.robot.set_state(arm='A', state=1)
-        self.robot.set_state(arm='B', state=1)
-        self.robot.set_vel_acc(arm='A', velRatio=velRatio, AccRatio=AccRatio)
-        self.robot.set_vel_acc(arm='B', velRatio=velRatio, AccRatio=AccRatio)
-        self.robot.send_cmd()
+        _checked_mode_command(self.robot, 'clear_set')
+        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=hold_left)
+        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=hold_right)
+        _checked_mode_command(self.robot, 'set_state', arm='A', state=1)
+        _checked_mode_command(self.robot, 'set_state', arm='B', state=1)
+        _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=velRatio, AccRatio=AccRatio)
+        _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=velRatio, AccRatio=AccRatio)
+        _checked_mode_command(self.robot, 'send_cmd')
 
         ok, diag = self._poll_arm_state_after_switch(
             target_state=1, timeout=2.0, should_abort=should_abort)
