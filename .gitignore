@@ -55,3 +55,6 @@ INTEGRATION_PLAN.md
 work/
 src/wuji-description/
 src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml
+
+# Operator-specific MANUS calibration profiles and backups.
+config/local_calibration/

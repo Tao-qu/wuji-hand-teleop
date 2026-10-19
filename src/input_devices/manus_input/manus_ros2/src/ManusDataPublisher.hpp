@@ -119,9 +119,13 @@ protected:
 
     static ManusDataPublisher *s_Instance;
 
-    // Calibration load status
-    bool m_LeftCalibrationLoaded = false;
-    bool m_RightCalibrationLoaded = false;
+    std::string m_LeftCalibrationFile;
+    std::string m_RightCalibrationFile;
+
+    // Calibration is bound to glove identity; retries are throttled.
+    std::map<uint32_t, Side> m_CalibrationLoaded;
+    std::map<uint32_t, std::chrono::steady_clock::time_point> m_CalibrationRetryAt;
+    std::map<uint32_t, std::chrono::steady_clock::time_point> m_CalibrationAppliedAt;
     
     //Connection type in case of remote m_IP is used, if empty auto discovery is used
     ConnectionType m_ConnectionType = ConnectionType::ConnectionType_Integrated;
@@ -136,7 +140,8 @@ protected:
     
     std::mutex m_RawSkeletonMutex;
     std::map<uint32_t, ClientRawSkeleton> m_GloveDataMap;
-    NodeInfo* m_NodeInfo = nullptr;
+    std::map<uint32_t, std::map<uint32_t, NodeInfo>> m_NodeInfoByGlove;
+    std::map<uint32_t, std::chrono::steady_clock::time_point> m_MetadataRetryAt;
     std::map<uint32_t, uint64_t> m_LastPublishedSequence;
     double m_SourceTimeout = 0.20;
     

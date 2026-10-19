@@ -30,3 +30,9 @@ controller:
   control_rate: 120.0
   input_timeout: 0.20       # SDK-frame age and monotonic receipt deadline
   flip_y: false            # explicit right-handed MANUS input; preserve XYZ chirality
+
+# Empty paths use bundled tpxLeftMetaglovePro.mcal / tpxRightMetaglovePro.mcal.
+# Set absolute paths here to select different operator-specific profiles.
+manus:
+  left_calibration_file: ""
+  right_calibration_file: ""

@@ -1,5 +1,6 @@
 #include "ManusDataPublisher.hpp"
 #include "ManusSDKTypes.h"
+#include "../tools/manus_skeleton_metadata.hpp"
 #include <fstream>
 #include <iostream>
 #include <thread>
@@ -24,6 +25,8 @@ ManusDataPublisher::ManusDataPublisher() : Node("manus_data_publisher")
     if (!std::isfinite(m_SourceTimeout) || m_SourceTimeout <= 0.0) {
         throw std::invalid_argument("source_timeout must be finite and positive");
     }
+    m_LeftCalibrationFile = declare_parameter<std::string>("left_calibration_file", "");
+    m_RightCalibrationFile = declare_parameter<std::string>("right_calibration_file", "");
     s_Instance = this;
 
     // Initialize static variables
@@ -204,21 +207,6 @@ void ManusDataPublisher::PublishCallback()
     std::map <uint32_t, RawDeviceData> t_RawSensorDataMap = m_RawSensorDataMap;
     m_RawSensorDataMutex.unlock();
     
-    //Retrieve raw skeleton node info, should be identical for all gloves and is consistant for the used Core version
-    if(m_NodeInfo == nullptr && !t_GloveDataMap.empty()){
-
-        auto t_GloveData = t_GloveDataMap.begin();
-
-        m_NodeInfo = new NodeInfo[t_GloveData->second.info.nodesCount];
-        const SDKReturnCode t_Result = CoreSdk_GetRawSkeletonNodeInfoArray(t_GloveData->first, m_NodeInfo, t_GloveData->second.info.nodesCount);
-
-        if (t_Result != SDKReturnCode::SDKReturnCode_Success)
-        {
-            ClientLog::error("Failed to get Raw Skeleton Hierarchy. The error given was {}.", (int32_t)t_Result);
-            return;
-        }
-    }
-
     //Fetch latest landscape
     m_LandscapeMutex.lock();
     if(m_NewLandscape != nullptr){
@@ -254,18 +242,20 @@ void ManusDataPublisher::PublishCallback()
 
     for (size_t i = 0; i < m_Landscape->gloveDevices.gloveCount; i++)
     {
-        // Auto-load calibration file (once per hand)
-        uint32_t t_GloveId = m_Landscape->gloveDevices.gloves[i].id;
-        Side t_Side = m_Landscape->gloveDevices.gloves[i].side;
-
-        if (t_Side == Side_Left && !m_LeftCalibrationLoaded) {
+        // Calibration must be accepted for this exact glove before publishing.
+        const uint32_t t_GloveId = m_Landscape->gloveDevices.gloves[i].id;
+        const Side t_Side = m_Landscape->gloveDevices.gloves[i].side;
+        const auto t_CheckNow = std::chrono::steady_clock::now();
+        const auto t_Loaded = m_CalibrationLoaded.find(t_GloveId);
+        if (t_Loaded == m_CalibrationLoaded.end() || t_Loaded->second != t_Side) {
+            if (t_CheckNow < m_CalibrationRetryAt[t_GloveId]) continue;
+            m_CalibrationRetryAt[t_GloveId] = t_CheckNow + std::chrono::seconds(2);
             if (LoadCalibrationFile(t_GloveId, t_Side)) {
-                m_LeftCalibrationLoaded = true;
+                m_CalibrationLoaded[t_GloveId] = t_Side;
+                m_CalibrationAppliedAt[t_GloveId] = std::chrono::steady_clock::now();
             }
-        } else if (t_Side == Side_Right && !m_RightCalibrationLoaded) {
-            if (LoadCalibrationFile(t_GloveId, t_Side)) {
-                m_RightCalibrationLoaded = true;
-            }
+            // This snapshot predates loading, even when the SDK accepted it.
+            continue;
         }
 
         manus_ros2_msgs::msg::ManusGlove t_Msg;
@@ -283,8 +273,33 @@ void ManusDataPublisher::PublishCallback()
             std::chrono::steady_clock::now() - t_RawSkel.received_at).count();
         if (t_RawSkel.info.nodesCount == 0 || t_RawSkel.sequence == 0 ||
             t_RawSkel.sequence <= m_LastPublishedSequence[t_Msg.glove_id] ||
-            t_SourceAge < 0.0 || t_SourceAge >= m_SourceTimeout) {
+            t_SourceAge < 0.0 || t_SourceAge >= m_SourceTimeout ||
+            t_RawSkel.received_at <= m_CalibrationAppliedAt[t_GloveId]) {
             continue;
+        }
+        // Metadata belongs to this glove and is indexed by nodeId, never offset.
+        auto& t_Metadata = m_NodeInfoByGlove[t_GloveId];
+        if (!manus_tools::matches_raw_nodes(t_Metadata, t_RawSkel.nodes)) {
+            t_Metadata.clear();
+            if (t_CheckNow < m_MetadataRetryAt[t_GloveId]) continue;
+            m_MetadataRetryAt[t_GloveId] = t_CheckNow + std::chrono::seconds(2);
+            std::vector<NodeInfo> t_Info(t_RawSkel.info.nodesCount);
+            const auto t_Result = CoreSdk_GetRawSkeletonNodeInfoArray(
+                t_GloveId, t_Info.data(), static_cast<uint32_t>(t_Info.size()));
+            if (t_Result != SDKReturnCode_Success) {
+                ClientLog::error("Hierarchy query failed for glove {}: {}", t_GloveId, static_cast<int>(t_Result));
+                continue;
+            }
+            try {
+                t_Metadata = manus_tools::index_metadata(t_Info);
+                if (!manus_tools::matches_raw_nodes(t_Metadata, t_RawSkel.nodes)) {
+                    throw std::runtime_error("MANUS hierarchy/raw node IDs differ");
+                }
+            } catch (const std::exception& e) {
+                t_Metadata.clear();
+                ClientLog::error("Invalid hierarchy for glove {}: {}", t_GloveId, e.what());
+                continue;
+            }
         }
         t_Msg.header = t_RawSkel.header;
         t_Msg.header.frame_id = "manus_" + t_Msg.side;
@@ -294,9 +309,9 @@ void ManusDataPublisher::PublishCallback()
         for (const auto &node: t_RawSkel.nodes) {
             manus_ros2_msgs::msg::ManusRawNode t_Node;
             t_Node.node_id = node.id;
-            t_Node.parent_node_id = m_NodeInfo[node.id].parentId;
-            t_Node.joint_type = JointTypeToString(m_NodeInfo[node.id].fingerJointType);
-            t_Node.chain_type = ChainTypeToString(m_NodeInfo[node.id].chainType);
+            t_Node.parent_node_id = t_Metadata.at(node.id).parentId;
+            t_Node.joint_type = JointTypeToString(t_Metadata.at(node.id).fingerJointType);
+            t_Node.chain_type = ChainTypeToString(t_Metadata.at(node.id).chainType);
 
             ManusVec3 t_Pos = node.transform.position;
             ManusQuaternion t_Rot = node.transform.rotation;
@@ -460,6 +475,10 @@ void ManusDataPublisher::OnRawSkeletonStreamCallback(const SkeletonStreamInfo *c
 {
     if (!s_Instance || !p_RawSkeletonStreamInfo) return;
 
+    // Timestamp callback entry before waiting or acquiring SDK data. A callback
+    // already in flight when calibration finishes must not become a fresh frame.
+    const auto t_ReceivedAt = std::chrono::steady_clock::now();
+    const auto t_RosStamp = s_Instance->get_clock()->now();
     std::lock_guard<std::mutex> lock(s_Instance->m_RawSkeletonMutex);
     for (uint32_t i = 0; i < p_RawSkeletonStreamInfo->skeletonsCount; i++) {
         ClientRawSkeleton t_Next;
@@ -479,8 +498,8 @@ void ManusDataPublisher::OnRawSkeletonStreamCallback(const SkeletonStreamInfo *c
             continue;
         }
         t_Next.info.publishTime = p_RawSkeletonStreamInfo->publishTime;
-        t_Next.received_at = std::chrono::steady_clock::now();
-        t_Next.header.stamp = s_Instance->get_clock()->now();
+        t_Next.received_at = t_ReceivedAt;
+        t_Next.header.stamp = t_RosStamp;
         t_Next.sequence = previous == s_Instance->m_GloveDataMap.end()
             ? 1 : previous->second.sequence + 1;
         s_Instance->m_GloveDataMap.insert_or_assign(t_Next.info.gloveId, std::move(t_Next));
@@ -660,24 +679,19 @@ Side ManusDataPublisher::ErgonomicsDataTypeToSide(ErgonomicsDataType p_ErgoDataT
 /// @brief Auto-load calibration file
 bool ManusDataPublisher::LoadCalibrationFile(uint32_t p_GloveId, Side p_Side)
 {
-    // Get calibration file path from ROS2 package directory
-    std::string t_PackageShareDir;
-    try {
-        t_PackageShareDir = ament_index_cpp::get_package_share_directory("manus_ros2");
-    } catch (const std::exception& e) {
-        ClientLog::error("Failed to get package share directory: {}", e.what());
-        return false;
-    }
-
-    // Load different calibration files for left/right hand
-    std::string t_CalibrationPath;
-    if (p_Side == Side_Left) {
-        t_CalibrationPath = t_PackageShareDir + "/calibration/LeftMetaglovePro.mcal";
-    } else if (p_Side == Side_Right) {
-        t_CalibrationPath = t_PackageShareDir + "/calibration/RightMetaglovePro.mcal";
-    } else {
+    if (p_Side != Side_Left && p_Side != Side_Right) {
         ClientLog::error("Invalid Side value for calibration loading: {}", static_cast<int>(p_Side));
         return false;
+    }
+    std::string t_CalibrationPath = p_Side == Side_Left ? m_LeftCalibrationFile : m_RightCalibrationFile;
+    if (t_CalibrationPath.empty()) {
+        try {
+            t_CalibrationPath = ament_index_cpp::get_package_share_directory("manus_ros2") +
+                (p_Side == Side_Left ? "/calibration/tpxLeftMetaglovePro.mcal" : "/calibration/tpxRightMetaglovePro.mcal");
+        } catch (const std::exception& e) {
+            ClientLog::error("Failed to get package share directory: {}", e.what());
+            return false;
+        }
     }
 
     // Check if file exists
@@ -690,8 +704,8 @@ bool ManusDataPublisher::LoadCalibrationFile(uint32_t p_GloveId, Side p_Side)
     // Get file size (guard against tellg() failure which returns -1)
     t_File.seekg(0, std::ios::end);
     std::streampos t_FilePos = t_File.tellg();
-    if (t_FilePos <= 0) {
-        ClientLog::error("Failed to determine size of calibration file (or file empty): {}", t_CalibrationPath);
+    if (t_FilePos <= 0 || t_FilePos > 16 * 1024 * 1024) {
+        ClientLog::error("Invalid calibration file size (must be 1 byte to 16 MiB): {}", t_CalibrationPath);
         return false;
     }
     int t_FileLength = static_cast<int>(t_FilePos);
@@ -708,15 +722,17 @@ bool ManusDataPublisher::LoadCalibrationFile(uint32_t p_GloveId, Side p_Side)
     t_File.close();
 
     // Apply calibration data
-    SetGloveCalibrationReturnCode t_Result;
-    CoreSdk_SetGloveCalibration(p_GloveId, t_CalibrationData.data(), t_FileLength, &t_Result);
+    SetGloveCalibrationReturnCode t_Result = SetGloveCalibrationReturnCode_Error;
+    const SDKReturnCode t_SdkResult = CoreSdk_SetGloveCalibration(
+        p_GloveId, t_CalibrationData.data(), t_FileLength, &t_Result);
 
-    if (t_Result == SetGloveCalibrationReturnCode_Success) {
+    if (t_SdkResult == SDKReturnCode_Success && t_Result == SetGloveCalibrationReturnCode_Success) {
         ClientLog::print("Calibration loaded successfully for {} glove (ID: {})",
             p_Side == Side_Left ? "Left" : "Right", p_GloveId);
         return true;
     } else {
-        ClientLog::error("Failed to load calibration for glove ID: {}, error code: {}", p_GloveId, static_cast<int>(t_Result));
+        ClientLog::error("Failed to load calibration for glove ID: {}, SDK code: {}, calibration code: {}",
+            p_GloveId, static_cast<int>(t_SdkResult), static_cast<int>(t_Result));
         return false;
     }
 }

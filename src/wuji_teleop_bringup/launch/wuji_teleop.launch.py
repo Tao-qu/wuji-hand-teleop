@@ -32,7 +32,8 @@ def _nodes(context):
         if len(set(serials)) != len(serials) or len(set(names)) != len(names):
             raise ValueError("Each hand must have a distinct serial number and namespace")
         if not read_only:
-            nodes.append(Node(package="manus_ros2", executable="manus_data_publisher", output="screen"))
+            nodes.append(Node(package="manus_ros2", executable="manus_data_publisher", output="screen",
+                              parameters=[config.get("manus", {})]))
         for side in sides:
             cfg = config[f"{side}_hand"]
             serial = str(cfg["serial_number"])
