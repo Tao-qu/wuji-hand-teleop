@@ -1,6 +1,6 @@
 # Right Hand 2 Encoder 1 warning: support evidence
 
-**Local support draft, 2026-10-19. Not sent to the vendor. Sustained motor following remains unaccepted.** The latest intended MANUS-following test stopped on right middle-finger PIP error `0x0003`. Later disabled observations found no active error, but did not explain the warning or establish reliable encoder behavior during motion. This report preserves that distinction and the existing fault guard.
+**Local support draft, 2026-10-19. Not sent to the vendor.** Subsequent attended right-hand checks passed a three-second measured-pose hold and three bounded middle-finger PIP extensions without errors, with fresh disable confirmation. The earlier `0x0003` warning's cause remains unresolved, and sustained MANUS following remains unaccepted. Successful isolated checks do not replace the failed following record below.
 
 The complete operational chronology, including an intervening unintended legacy-test execution and its cleanup, is in [the hardware acceptance record](HARDWARE_ACCEPTANCE_2026-10-19.md). The later read-only records below are separate observations, not an uninterrupted recording from the original warning. Times are Asia/Shanghai (UTC+08:00) unless marked UTC.
 
@@ -45,6 +45,20 @@ The pinned [real-hand retargeting example](https://github.com/wuji-technology/wu
 
 Error names and decoded meanings above are tied to the installed SDK version. The documentation URLs use the vendor's moving `latest` pages and are not a firmware `2.5.1` compatibility guarantee.
 
+## Additional official release evidence
+
+The [pinned SDK changelog](https://github.com/wuji-technology/wuji-sdk/blob/b71a55a55b002e4dc4178f38156f65686fdb3156/CHANGELOG.md) explicitly retains handling for firmware `2.6.0` and earlier on port `7447`. Its September release notes say error names and codes did not change when descriptions switched language. These facts do not support treating code `3` as a known SDK-version decoding error. However, no inspected public compatibility matrix certifies every diagnostic feature of SDK `2026.10.12` with firmware `2.5.1`.
+
+The official [product release notes](https://docs.wuji.tech/docs/zh/release-notes) contain related firmware changes:
+
+| Release | Published change | Relevance and limit |
+| --- | --- | --- |
+| Firmware `2.1.0`, 2026-07-21 | Improved encoder monitoring to avoid high-speed false warnings and detect genuine degradation earlier. | The recorded top-level `2.5.1` version is later. This older fix does not establish that the current warning is the same defect. |
+| Firmware `2.6.0`, 2026-08-31 | Damaged encoder frames produce an immediate indication; persistent damage stops the affected joint. Also fixes a separate false-overcurrent condition during pinching. | Neither entry explicitly identifies this unit's `Enc1BitRate` occurrence as a corrected false positive. No firmware change was performed for this investigation. |
+| Firmware `2.10.0`, 2026-09-22 | Built-in feed-forward compensation requires matching SDK support and applies to devices shipped from October 2026. | Do not infer that the current `2.5.1` device has that compensation merely because the newer SDK exposes its configuration methods. |
+
+No `2.5.1`-specific encoder erratum or supported public raw Encoder 1 quality getter was found in the inspected sources. The [CLI health-diagnostics documentation](https://docs.wuji.tech/docs/zh/wuji-cli/latest/doctor) documents glove EMF/tactile recipes; it does not establish a Hand 2 Encoder 1 quality test. The existing error latch and calibration/protection settings remain unchanged.
+
 ## Subsequent read-only evidence
 
 A separate immediate post-stop five-second observation recorded 467 left / 466 right diagnostic frames, zero enabled joints, no active errors, and all joint extended states `1` (`Ready`). Final state and diagnostic ages were below 1 ms. This shows the warning was absent during that disabled sample, not that it would remain absent during motion. Evidence: `work/hand2-post-tpx-fault-readonly.json`.
@@ -86,6 +100,35 @@ This session recorded 19 diagnostic / 13 state frames, maximum enabled count zer
 An empty history response does **not** disprove the previously captured code `3`. Warning inclusion, retention, reset behavior, and firmware support for this history need vendor confirmation. These later sessions do not establish continuous uptime or uninterrupted error-history retention since the failure. No raw Encoder 1 quality rate, chip status, or signal-strength getter was found among the advertised resources; no undocumented paths were probed.
 
 The earlier read-only flash-log export saved 1,208 records. The filtered history contained bus parser retry messages, but no identified explanation of the Encoder 1 warning. No causal link between those messages and code `3` has been established. The export is separate from the per-joint `error_log` response.
+
+## Version-resource follow-up
+
+A later read-only session retrieved the advertised `master_version_detail` and `slave_version` resources and closed successfully. They returned opaque byte payloads of 11 and 261 bytes. The same session returned `firmware_version="v2.5.1"` and `middle/S3/hw_version=0.2.0`. Evidence: `work/hand2-right-version-resources-1792423017591524135.json`.
+
+The pinned Python stubs, official SDK example repository, and inspected device/data reference pages provide no explicit layout or offline decoder for those two byte resources. No field boundaries, byte order, or node mapping were inferred. In particular, the hardware version is not a firmware version, and the raw slave-version response does **not** establish that `nid=13` runs firmware `2.5.1`. Per-node firmware equality remains unverified pending an official schema or decoder.
+
+## Attended measured-pose hold and bounded extension
+
+The diagnostic tool `tools/verify_hand_hold.py` uses the existing bridge safety core with the exact right-hand serial. A separate offline fixture run passed 17 tests; this checks the tool's software behavior, not the physical warning's cause. The hardware checks below used `kp=5.0`, `kd=0.1`, `effort_limit=0.8 A`, a `0.1 rad/s` command-velocity bound, and the existing timeouts/error latch. No glove targets were supplied. The enabled checks held the safety core's fixed post-enable measured pose for all 20 joints; the extension changed only joint index `10` from that pose.
+
+| Check and evidence | Observed result |
+| --- | --- |
+| Read-only baseline: `work/hand2-hold-20261019T152601-adb975c9.json` | Completed with zero enable attempts, zero raw-copy errors, and zero raw error frames. Final feedback was fresh with all 20 joints `Ready`; session closed. |
+| Three-second fixed-pose hold: `work/hand2-hold-20261019T152620-a7c40f4d.json` | One enable attempt; completed without recorded errors. Maximum measured drift from the pre-enable pose was `0.000022411 rad`; peak absolute current across sampled joints was `0.049628 A`. Fresh final `STOPPED` feedback confirmed all 20 joints disabled; session closed. |
+| Three-second hold followed by a `0.02 rad` extension request: `work/hand2-hold-20261019T152653-350466d5.json` | Completed the subsequent 0.7-second extension window without recorded errors. Middle PIP moved from `0.392364264` to `0.381720066 rad` at the last extension sample: displacement `-0.010644197 rad`. Maximum observed middle-PIP displacement was `0.010651708 rad`; maximum all-joint displacement from the pre-enable pose was `0.010657787 rad`. Peak absolute sampled current was `0.158249 A`. Fresh final `STOPPED` feedback confirmed all 20 joints disabled; session closed. |
+| Three-second hold followed by a `0.05 rad` extension request: `work/hand2-hold-20261019T152755-f111cb2d.json` | Completed the subsequent 1.0-second extension window without recorded errors. Middle PIP moved from `0.381723046` to `0.341068029 rad` at the last extension sample: displacement `-0.040655017 rad`. Maximum all-joint displacement from the pre-enable pose was `0.040653467 rad`; peak absolute sampled current was `0.218090 A`. Fresh final `STOPPED` feedback confirmed all 20 joints disabled; session closed. |
+
+All three enabled checks recorded `raw_copy_error_count=0`, `raw_error_frame_count=0`, and `disabled_confirmed=true`. The extensions establish meaningful motion in the selected direction within these bounded checks. Their targets were `0.372364264` and `0.331723046 rad`, respectively, so neither observed endpoint converged to the full requested displacement. Displacement from each post-enable `q0` and maximum drift from the separately sampled pre-enable pose use different reference values. The records do not identify the source of the tracking residuals or justify changing gains/current to eliminate them. Absence of code `3` in these short, isolated checks does not resolve its cause or validate sustained MANUS following, other postures, or all joints.
+
+### Small extension at the configured command velocity
+
+The subsequent attended run `work/hand2-hold-20261019T153113-fd22d4e8.json` used the same fixed three-second hold, then a `0.05 rad` middle-PIP extension with the command slew cap set to `1.0 rad/s`. The other 19 joint targets stayed fixed. No raw fault event or diagnostic-copy error was recorded, and fresh advancing feedback confirmed all 20 joints disabled before closing the device. Actual middle-PIP displacement at the end of the extension stage was `-0.0359999 rad`; the requested displacement was `-0.05 rad`. Maximum all-joint displacement relative to the pre-enable baseline was `0.0360104 rad`, and peak sampled current was `0.209972 A`.
+
+The sampled SDK middle-PIP velocity reached `1.27072 rad/s`. The `1.0 rad/s` setting limits command slew; it is not a guarantee that measured joint speed stays below that number. This run exercised a faster small target change without reproducing code `3`. It does not validate the complete hand workspace, simultaneous finger motion, sustained following, or the cause of the earlier event. The probe's optional velocity is limited to `(0, 1.0]`; it rejects combinations requiring more than five seconds for the extension phase before connecting. Its default remains `0.1 rad/s`. The updated fake-backend probe tests passed **26 tests in 2.17 seconds**.
+
+The earlier failed TPX following record retains only aggregate ranges, counts, peak current, observed error codes, and terminal diagnostics. Its collector did not save sample timestamps, velocities, original target/actual position sequences, or the raw warning frame; its result log repeats the same summary. The ranges also include callbacks processed during stopping and disable confirmation. They therefore cannot establish a command jump, fault-time velocity, invalid target, or collision near the warning. The separate TPX open/deep-curl pose files contain median targets from other captures, not the fault state, so their offline contact results cannot be correlated with this event. A subsequent attended following investigation needs timestamped controller targets, commands actually sent after trajectory limiting, measured positions/velocities, and complete raw diagnostics with source sequence/timestamps and lifecycle stages across the warning and stop. The existing summary cannot recover that missing history.
+
+The final offline suite passed 374 tests in 27.81 seconds, including additional regressions that reject raw warnings, copy errors, excessive drift, or stop requests arriving at the final phase boundary. Raw events received during disable/close also prevent a successful probe result. These checks did not require another motor test; the recorded hardware runs above all had zero raw warning and copy-error counts. Synchronous native RPCs cannot be preempted by the Python stop flag; the CLI handles SIGINT/SIGTERM by requesting cleanup in its owner loop. Reports are written after that cleanup, so a native hang or forced process kill can leave incomplete evidence.
 
 ## Reproducing the read operations
 
@@ -144,6 +187,12 @@ The collection scripts retained locally are `work/collect_hand2_right_encoder_re
 | `work/hand2-right-encoder-readonly.json` | Full serialized diagnostic frames, sampled state frames, resource metadata, direct GET/communication results, and follow-up error-resource evidence |
 | `work/hand2-right-encoder-readonly.json.gz` | Compressed copy of the preceding full record |
 | `work/hand2-right-encoder-error-history-readonly.json` | Follow-up resource capabilities, returned error values, and disabled-state evidence |
+| `work/hand2-right-version-resources-1792423017591524135.json` | Top-level firmware, target hardware version, and undecoded master/slave version bytes |
+| `work/hand2-hold-20261019T152601-adb975c9.json` | Read-only baseline for the attended hold tool |
+| `work/hand2-hold-20261019T152620-a7c40f4d.json` | Three-second fixed measured-pose hold and fresh disable confirmation |
+| `work/hand2-hold-20261019T152653-350466d5.json` | Bounded middle-PIP extension, tracking residual, and fresh disable confirmation |
+| `work/hand2-hold-20261019T153113-fd22d4e8.json` | Bounded 0.05-rad middle-PIP extension at the configured 1.0-rad/s command slew cap |
+| `work/hand2-hold-20261019T152755-f111cb2d.json` | Separate `0.05 rad` middle-PIP extension at `0.1 rad/s`, tracking residual, and fresh disable confirmation |
 | `work/right-hand-flash-export.json` | Metadata for the separate 1,208-record flash-log export |
 | `work/hand2-flash-logs/flash_WH2KA01260823036_2026-10-19_223023.jsonl` | Exported device history; inspect locally before including any excerpt in a support package |
 
@@ -154,9 +203,9 @@ The full uncompressed right-hand record is **56,832,183 bytes**, SHA-256 `afabf7
 1. For serial `WH2KA01260823036`, hardware `0.2.0`, firmware `2.5.1`, what precise chip flags, sample window, and thresholds trigger `Enc1BitRate`? Does enabled/disabled state change the sampling or detection behavior?
 2. Is there a supported **read-only** API or diagnostic tool for joint `nid=13` that exposes Encoder 1 raw quality flags, flag rate, signal/magnet-quality values, or a warning transition trace? None was found in the advertised public resources. Please specify the exact supported interface and firmware requirement.
 3. Does firmware `2.5.1` retain `Warning` / `AutoClear` transitions in `middle/S3/error_log`? What resets or evicts that history, and is an empty response after a captured code `3` expected? Are error status/history resources fully supported in this firmware/SDK combination?
-4. Is `wuji-sdk==2026.10.12` supported with firmware `2.5.1` for joint diagnostics and error decoding? Are there relevant encoder-quality detection errata or firmware fixes? Please identify the applicable release and reason before proposing any firmware change.
+4. Is `wuji-sdk==2026.10.12` supported with firmware `2.5.1` for joint diagnostics and error decoding? Are there relevant encoder-quality detection errata or firmware fixes? Please identify the applicable release and reason before proposing any firmware change. Please also provide the `master_version_detail` / `slave_version` binary schema or supported decoder so the actual `nid=13` firmware can be verified.
 5. What evidence distinguishes a transient acceptable flag from an encoder condition requiring service before closed-loop motion? Firmware `Warning` semantics alone do not supply an acceptance criterion for this unit. Please provide the recommended investigation and motion-resumption criteria.
 6. Which inspections are appropriate with the device disabled and powered off, and which require factory/service work? The catalog mentions encoder/magnet positioning; no internal adjustment, recalibration, or disassembly has been attempted for this investigation.
 7. What is the documented ordering of `FingerCommunicationDiagnostics.nodes` on this firmware, including any tactile node? The array lacks explicit NIDs, so its slot statistics have intentionally not been mapped to `nid=13`.
 
-Pending those answers, the evidence supports fresh, disabled communication and no active warning during the sampled intervals. It does not establish the warning's cause, safe motion through the warning, sustained all-finger following, or full-system acceptance. Keep the nonzero-error latch and explicit recovery requirement; do not change protection, calibration, current, or joint limits merely to obtain a passing run.
+The evidence supports the recorded disabled observations, a short fixed-pose hold, and bounded selected-joint extension without a recurring warning in those windows. It does not establish the warning's cause, safe motion through the warning, sustained all-finger following, or full-system acceptance. Keep the nonzero-error latch and explicit recovery requirement; do not change protection, calibration, current, or joint limits merely to obtain a passing run.
