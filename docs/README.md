@@ -11,3 +11,5 @@
 The target is Wuji Hand 2.2 with the official Wuji SDK. Launch defaults to disabled hand and arm motors; feedback-only hand mode is available separately. Tianji payload values are reused from the cabinet until the new mounted hand assemblies are calibrated. Build and offline-test results do not establish hardware acceptance.
 
 - [Hardware acceptance record — 2026-10-19](HARDWARE_ACCEPTANCE_2026-10-19.md): measured results, failed attempts, corrections, and remaining hardware checks.
+- [Attended acceptance runbook](ATTENDED_ACCEPTANCE.md): actuator-free preview, fresh disabled baseline, separate motion stages, and combined acceptance.
+- [Right-hand encoder diagnostic](HAND2_ENCODER_DIAGNOSTIC.md): local evidence and manufacturer follow-up questions; no support message has been sent.
