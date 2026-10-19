@@ -553,10 +553,18 @@ class TianjiArmControllerNode(Node):
 
     def _clear_error_cb(self, arm, request, response):
         side = 'left' if arm == 'A' else 'right'
+        if self._arm_enabled:
+            response.success = False
+            response.message = 'Stop both arms before requesting an explicit fault clear'
+            return response
+        if not request.data:
+            response.success = False
+            response.message = 'Fault clear requires an explicit true request'
+            return response
         try:
             self.controller.clear_arm_error(arm)
             response.success = True
-            response.message = f"{side} arm errors cleared"
+            response.message = f'{side} arm error cleared; fresh standby confirmed'
         except Exception as e:
             response.success = False
             response.message = f"{side} arm clear-error failed: {e}"
@@ -588,8 +596,17 @@ class TianjiArmControllerNode(Node):
         target_enum = ArmState.POSITION if request.data else ArmState.IMPEDANCE
         _NAMES = {1: "rigid (position)", 3: "compliant (impedance)"}
 
+        if not self._arm_enabled:
+            response.success = False
+            response.message = 'Arms not enabled; enable explicitly before changing mode'
+            return response
         try:
-            left_s, right_s = self.controller.get_arm_states_only()
+            states = self.controller.get_arm_controller_states()
+            if any(state['err_code'] != 0 or state['cur_state'] not in (1, 3) for state in states):
+                response.success = False
+                response.message = f'Cannot switch mode with a controller fault or transition: {states}'
+                return response
+            left_s, right_s = (state['cur_state'] for state in states)
         except Exception as e:
             response.success = False
             response.message = f"Failed to read hardware state, cannot determine mode: {e}"
@@ -610,18 +627,12 @@ class TianjiArmControllerNode(Node):
             return response
 
         try:
-            # Clear any accumulated errors/alarms before switching (mirrors set_active).
-            robot = self.controller.robot
-            robot.clear_set()
-            robot.clear_error('A')
-            robot.clear_error('B')
-            robot.send_cmd()
-            time.sleep(0.5)
-
             if target_state == 1:
-                self.controller.set_position_mode(velRatio=30, AccRatio=30)
+                self.controller.set_position_mode(
+                    velRatio=30, AccRatio=30, should_abort=self._initialization_should_abort)
             else:
-                self.controller.set_impedance_mode(mode='joint')
+                self.controller.set_impedance_mode(
+                    mode='joint', should_abort=self._initialization_should_abort)
         except Exception as e:
             self._on_sdk_error("set_arm_state", e)
             response.success = False

@@ -230,9 +230,20 @@ class TianjiChestDriver:
         than trusting a Python flag). One SDK subscribe, no servo-error
         read — about 5 ms. Much lighter than get_arm_status().
         """
-        dcss = DCSS()
-        sub_data = self.robot.subscribe(dcss)
-        return (sub_data["states"][0]["cur_state"], sub_data["states"][1]["cur_state"])
+        states = self.get_arm_controller_states()
+        return (states[0]['cur_state'], states[1]['cur_state'])
+
+    def get_arm_controller_states(self):
+        """Read both controller states/errors from a fresh cabinet snapshot."""
+        sub_data = self.robot.subscribe(DCSS())
+        self._feedback_guard.observe(sub_data)
+        states = sub_data.get('states')
+        if (not isinstance(states, (list, tuple)) or len(states) != 2
+                or any(not isinstance(state, dict) or
+                       not isinstance(state.get('cur_state'), int) or
+                       not isinstance(state.get('err_code'), int) for state in states)):
+            raise ValueError('missing or invalid cabinet controller state/error')
+        return states
 
     def get_arm_status(self):
         """Dual-arm state codes, servo error codes, and trajectory-realtime metrics.
@@ -670,13 +681,12 @@ class TianjiChestDriver:
         self.logger.info("Dual-arm STANDBY reached (cur_state=0)")
 
     def set_active(self, mode='joint', K=None, D=None):
-        """Servo-on (state=3), apply impedance params. Safe to call any time."""
+        """Explicit servo-on from fault-free feedback; never clears errors."""
+        states = self.get_arm_controller_states()
+        if any(state['err_code'] != 0 or state['cur_state'] not in (0, 1, 2, 3, 4)
+               for state in states):
+            raise RuntimeError(f'Cannot activate with a controller fault or transition: {states}')
         self.logger.info("Dual-arm ACTIVE (impedance mode)")
-        self.robot.clear_set()
-        self.robot.clear_error('A')
-        self.robot.clear_error('B')
-        self.robot.send_cmd()
-        time.sleep(0.5)
         self.set_impedance_mode(mode=mode, K=K, D=D)
 
     def set_position_mode(self, velRatio=30, AccRatio=30, should_abort=None):
@@ -712,14 +722,56 @@ class TianjiChestDriver:
         self.robot.set_param('int', param, 1)
         self.logger.info(f"{'left' if arm == 'A' else 'right'} arm brake held")
 
-    def clear_arm_error(self, arm: str = 'A'):
-        """Clear error state on a single arm."""
+    def clear_arm_error(self, arm: str = 'A', timeout=3.0):
+        """Request one explicit clear and confirm fresh, stable disabled state.
+
+        Native OnClearErr already sends the RESET parameter immediately; it
+        is void and is not a staged command or a success acknowledgement.
+        No extra send, enable, state change, or application-level retry follows.
+        """
+        if arm not in ('A', 'B'):
+            raise ValueError('arm must be A or B')
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError('clear timeout must be finite and positive')
         side = 'left' if arm == 'A' else 'right'
-        self.robot.clear_set()
+        index = 0 if arm == 'A' else 1
+        deadline = time.monotonic() + timeout
+        guard = DualArmFeedbackGuard()
         self.robot.clear_error(arm)
-        self.robot.send_cmd()
-        time.sleep(0.5)
-        self.logger.info(f"{side} arm error cleared (clear_error {arm})")
+        last_state = None
+        last_rejection = 'waiting for post-clear feedback'
+        previous_serials = None
+        stable_since = None
+        while time.monotonic() < deadline:
+            snapshot = self.robot.subscribe(DCSS())
+            try:
+                guard.observe(snapshot)
+                states = snapshot.get('states')
+                last_state = states[index] if isinstance(states, (list, tuple)) and len(states) == 2 else None
+                if (not isinstance(last_state, dict) or last_state.get('cur_state') != 0
+                        or last_state.get('err_code') != 0):
+                    stable_since = None
+                    last_rejection = 'target arm has not reached state=0, err_code=0'
+                else:
+                    serials = tuple(guard.serials)
+                    if (previous_serials is None or
+                            all(current != previous for current, previous
+                                in zip(serials, previous_serials))):
+                        now = time.monotonic()
+                        if stable_since is None:
+                            stable_since = now
+                        elif now - stable_since >= 0.1 and now <= deadline:
+                            self.logger.info(f'{side} arm error cleared; fresh standby confirmed')
+                            return
+                        previous_serials = serials
+                    last_rejection = 'waiting for stable post-clear standby feedback'
+            except ValueError as error:
+                stable_since = None
+                previous_serials = None
+                last_rejection = str(error)
+            time.sleep(0.01)
+        raise RuntimeError(f'{side} clear-error unconfirmed after {timeout}s; '
+                           f'controller state={last_state}; {last_rejection}')
 
     def disable_and_release(self, poll_timeout=3.0):
         """Confirm both arms disabled, release the session, and report failures."""

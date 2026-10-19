@@ -490,3 +490,109 @@ def test_unsettled_feedback_cannot_be_reported_as_success_by_move_to_init():
         logger=Mock(), move_to_joints_smooth=Mock(),
         _wait_for_init_settle=Mock(return_value=(False, [0] * 7, [0] * 7)))
     assert not TianjiChestDriver.move_to_init(driver, wait=True, timeout=15)
+
+
+def run_clear_feedback(state, error, advancing=True, freeze_left=False):
+    now = [0.0]
+    counter = [0]
+    robot = Mock()
+    def read(_):
+        counter[0] += 1
+        serial = counter[0] if advancing else 984732
+        result = snapshot(984732 if freeze_left else serial, serial)
+        result['states'] = [{'cur_state': 0, 'err_code': 0},
+                            {'cur_state': state, 'err_code': error}]
+        return result
+    robot.subscribe.side_effect = read
+    driver = SimpleNamespace(robot=robot, logger=Mock())
+    def sleep(duration):
+        now[0] += duration
+    with patch('tianji_output.tianji_chest_driver.time.monotonic', side_effect=lambda: now[0]), \
+         patch('tianji_output.tianji_chest_driver.time.sleep', side_effect=sleep), \
+         patch('tianji_output.tianji_chest_driver.DualArmFeedbackGuard',
+               side_effect=lambda: DualArmFeedbackGuard(clock=lambda: now[0])):
+        try:
+            TianjiChestDriver.clear_arm_error(driver, 'B', timeout=.3)
+            failure = None
+        except RuntimeError as error:
+            failure = error
+    robot.clear_error.assert_called_once_with('B')
+    robot.clear_set.assert_not_called()
+    robot.send_cmd.assert_not_called()
+    robot.set_state.assert_not_called()
+    return driver, failure, now[0]
+
+
+def test_clear_fault_requires_fresh_disabled_zero_error_feedback():
+    driver, failure, elapsed = run_clear_feedback(0, 0)
+    assert failure is None and .1 <= elapsed < .2
+    driver.logger.info.assert_called_once()
+
+
+@pytest.mark.parametrize('state,error', [(100, 0), (100, 6), (0, 6), (3, 0)])
+def test_clear_fault_never_treats_error_state_or_enabled_state_as_success(state, error):
+    driver, failure, elapsed = run_clear_feedback(state, error)
+    assert failure is not None and 'unconfirmed' in str(failure)
+    assert elapsed == pytest.approx(.3)
+    driver.logger.info.assert_not_called()
+
+
+@pytest.mark.parametrize('advancing,freeze_left', [(False, False), (True, True)])
+def test_clear_fault_rejects_cached_or_one_sided_feedback(advancing, freeze_left):
+    driver, failure, elapsed = run_clear_feedback(0, 0, advancing, freeze_left)
+    assert failure is not None and 'advancing' in str(failure)
+    driver.logger.info.assert_not_called()
+
+
+@pytest.mark.parametrize('enabled,request_data', [(True, True), (False, False)])
+def test_node_rejects_clear_while_enabled_or_without_explicit_request(enabled, request_data):
+    node = SimpleNamespace(_arm_enabled=enabled, controller=Mock())
+    response = TianjiArmControllerNode._clear_error_cb(
+        node, 'B', SimpleNamespace(data=request_data), SimpleNamespace())
+    assert not response.success
+    node.controller.clear_arm_error.assert_not_called()
+
+
+def test_node_clear_does_not_hide_unconfirmed_result():
+    node = SimpleNamespace(_arm_enabled=False, controller=Mock())
+    node.controller.clear_arm_error.side_effect = RuntimeError('right clear-error unconfirmed')
+    response = TianjiArmControllerNode._clear_error_cb(
+        node, 'B', SimpleNamespace(data=True), SimpleNamespace())
+    assert not response.success and 'unconfirmed' in response.message
+
+
+@pytest.mark.parametrize('state,error', [(100, 0), (100, 6), (3, 6)])
+def test_manual_mode_switch_never_clears_or_bypasses_a_controller_fault(state, error):
+    controller = Mock()
+    controller.get_arm_controller_states.return_value = [
+        {'cur_state': 3, 'err_code': 0}, {'cur_state': state, 'err_code': error}]
+    node = SimpleNamespace(_arm_enabled=True, controller=controller)
+    response = TianjiArmControllerNode._set_arm_state_callback(
+        node, SimpleNamespace(data=False), SimpleNamespace())
+    assert not response.success
+    controller.set_impedance_mode.assert_not_called()
+    controller.set_position_mode.assert_not_called()
+    controller.robot.clear_error.assert_not_called()
+    controller.robot.send_cmd.assert_not_called()
+
+
+@pytest.mark.parametrize('state,error', [(100, 0), (100, 6), (0, 6)])
+def test_legacy_set_active_rejects_faults_without_clearing_them(state, error):
+    driver = SimpleNamespace(robot=Mock(), logger=Mock(), set_impedance_mode=Mock(),
+        get_arm_controller_states=lambda: [
+            {'cur_state': 0, 'err_code': 0}, {'cur_state': state, 'err_code': error}])
+    with pytest.raises(RuntimeError, match='fault or transition'):
+        TianjiChestDriver.set_active(driver)
+    driver.robot.clear_error.assert_not_called()
+    driver.robot.send_cmd.assert_not_called()
+    driver.set_impedance_mode.assert_not_called()
+
+
+def test_legacy_set_active_uses_faultfree_mode_switch_without_reset_batch():
+    driver = SimpleNamespace(robot=Mock(), logger=Mock(), set_impedance_mode=Mock(),
+        get_arm_controller_states=lambda: [{'cur_state': 0, 'err_code': 0}] * 2)
+    TianjiChestDriver.set_active(driver)
+    driver.set_impedance_mode.assert_called_once()
+    driver.robot.clear_error.assert_not_called()
+    driver.robot.clear_set.assert_not_called()
+    driver.robot.send_cmd.assert_not_called()
