@@ -29,4 +29,4 @@ driver:
 controller:
   control_rate: 120.0
   input_timeout: 0.20       # SDK-frame age and monotonic receipt deadline
-  flip_y: true             # existing MANUS convention; validate both hands in dry-run
+  flip_y: false            # explicit right-handed MANUS input; preserve XYZ chirality

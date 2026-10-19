@@ -37,7 +37,7 @@ The configuration tool copies missing templates and preserves existing local set
 | `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet IP, arm initial poses, tool dynamics source, optional tool transforms |
 | `src/wuji_teleop_bringup/config/static_transforms.yaml` | Chest and wrist coordinate transforms |
 
-`hand2.yaml` is the active hand configuration; the controller uses the SDK's built-in Hand 2 retargeting model. `controller.flip_y` preserves the current MANUS convention, and must be checked with left/right pose recordings before motor operation. Calibrate MANUS for the current operator using the [MANUS guide](src/input_devices/manus_input/README.md).
+`hand2.yaml` is the active hand configuration; the controller uses the SDK's built-in Hand 2 retargeting model. `controller.flip_y` defaults to `false` because MANUS explicitly publishes right-handed coordinates; preserve XYZ and verify left/right flexion, abduction, and thumb opposition with motors disabled before live following. A reflection is an opt-in change for a separately validated source convention. Calibrate MANUS for the current operator using the [MANUS guide](src/input_devices/manus_input/README.md).
 
 The arm configuration defaults to `tool_dynamics.source: controller`: it reads and reuses the cabinet's existing payload values. This does **not** mean that the new hand assembly has been calibrated. After measuring each complete hand, adapter, and cable assembly, select `configured` and supply the independent left/right values described in the template. Tool transforms use millimetres; Tracker offsets use metres. Apply a geometric tool offset in the IK configuration or target TF chain once.
 

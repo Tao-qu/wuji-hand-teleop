@@ -71,7 +71,7 @@ Fill in local `hand2.yaml`, `openvr_input.yaml`, and `tianji_chest.yaml` files g
 
 - `left_hand` and `right_hand`: unique `serial_number` and ROS `name`.
 - `driver`: model/firmware, update rates, watchdog deadlines, ramp, velocity, MIT gains, current limit, and enable policy.
-- `controller`: MANUS `control_rate`, `input_timeout`, and configurable `flip_y` reflection.
+- `controller`: MANUS `control_rate`, `input_timeout`, and `flip_y: false`. The publisher explicitly requests right-handed coordinates, so the controller preserves XYZ. Set `flip_y: true` only for a separately validated input convention; it reverses chirality and is not a wrist rotation.
 
 The configuration tool manages only the three project templates and never replaces an existing local file. `python3 tools/configure.py --check` reports missing local files without writing. Generate local configuration before building, so the files are installed into ROS share directories:
 

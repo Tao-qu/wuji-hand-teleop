@@ -30,12 +30,13 @@ def validate_keypoints(points) -> np.ndarray:
     return points.copy()
 
 
-def manus_to_keypoints(message, *, flip_y: bool = True) -> np.ndarray:
+def manus_to_keypoints(message, *, flip_y: bool = False) -> np.ndarray:
     """Convert MANUS IDs without applying the old retargeter's wrist transforms.
 
-    flip_y preserves the existing MANUS coordinate convention. It is a ROS
-    parameter so a recorded left/right pose can verify the convention before
-    enabling hardware. The SDK receives MediaPipe-order points in metres.
+    The publisher explicitly requests right-handed MANUS coordinates, so the
+    default preserves XYZ and chirality. flip_y is an opt-in reflection for a
+    separately validated input convention. The SDK receives MediaPipe-order
+    points in metres; validate recorded left/right poses before enabling motors.
     """
     positions = {}
     required = set(MEDIAPIPE_TO_MANUS)

@@ -34,8 +34,9 @@ def manus_message():
 class ManusValidationTests(unittest.TestCase):
     def test_mapping_uses_ids_and_configurable_reflection(self):
         msg = manus_message()
+        np.testing.assert_array_equal(manus_to_keypoints(msg), open_hand())
         np.testing.assert_array_equal(manus_to_keypoints(msg, flip_y=False), open_hand())
-        np.testing.assert_array_equal(manus_to_keypoints(msg), open_hand() * [1, -1, 1])
+        np.testing.assert_array_equal(manus_to_keypoints(msg, flip_y=True), open_hand() * [1, -1, 1])
 
     def test_missing_and_duplicate_ids_are_rejected(self):
         msg = manus_message()

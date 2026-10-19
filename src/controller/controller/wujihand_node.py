@@ -25,7 +25,7 @@ class WujiHandControllerNode(Node):
         self._side = side
         self.declare_parameter("control_rate", 120.0)
         self.declare_parameter("input_timeout", 0.20)
-        self.declare_parameter("flip_y", True)
+        self.declare_parameter("flip_y", False)
         rate = float(self.get_parameter("control_rate").value)
         if not math.isfinite(rate) or rate <= 0:
             raise ValueError("control_rate must be finite and positive")

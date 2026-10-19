@@ -49,7 +49,7 @@ MANUS SDK raw skeleton callback
 | Ring | 13–16 | 13, 14, 15, 16 |
 | Pinky | 17–20 | 18, 19, 20, 21 |
 
-Missing or duplicate required IDs, non-finite coordinates, excessive scale, and a degenerate palm are rejected. `controller.flip_y` defaults to `true` to preserve the current MANUS coordinate convention. Validate open-hand, flexion, abduction, and thumb-opposition poses on both sides before enabling live following. The old retargeter's wrist transforms and custom first-generation retargeting YAML are not applied to the official session.
+Missing or duplicate required IDs, non-finite coordinates, excessive scale, and a degenerate palm are rejected. `CoordinateSystemVUH_Init` is followed by explicit MANUS `Right / PositiveZ / XFromViewer / 1.0f` assignments before SDK coordinate setup. `controller.flip_y` therefore defaults to `false`, preserving the right-handed XYZ positions. An opt-in Y reflection reverses chirality and must be validated for a different input convention; old results from the unspecified SDK fallback do not validate this corrected path. Validate open-hand, flexion, abduction, and thumb-opposition poses on both sides before enabling live following. The old retargeter's wrist transforms and custom first-generation retargeting YAML are not applied to the official session.
 
 The publisher advances the per-glove sequence only for a new SDK skeleton and publishes each sequence once. The controller routes by the message's `side`, rejects repeated/reordered sequences and stale acquisition stamps, and shortens its monotonic input deadline by the source age. A tracking gap or invalid frame resets the session and stops new commands. Restart publisher and controllers together if the publisher's sequence restarts.
 

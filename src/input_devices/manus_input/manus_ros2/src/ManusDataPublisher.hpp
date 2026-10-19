@@ -129,7 +129,7 @@ protected:
     
     //Coordinate system settings
     bool m_WorldSpace = true;
-    CoordinateSystemVUH m_CoordinateSystem = {AxisView::AxisView_XFromViewer, AxisPolarity::AxisPolarity_PositiveZ, Side::Side_Right, 1.0f};
+    CoordinateSystemVUH m_CoordinateSystem{}; // Assigned after SDK initialization.
     HandMotion m_HandMotion = HandMotion::HandMotion_None;
     
     std::map<uint32_t, rclcpp::Publisher<manus_ros2_msgs::msg::ManusGlove>::SharedPtr> m_GlovePublisher;

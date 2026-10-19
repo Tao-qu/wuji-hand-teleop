@@ -112,6 +112,11 @@ ClientReturnCode ManusDataPublisher::InitializeSDK()
     }
 
     CoordinateSystemVUH_Init(&m_CoordinateSystem);
+    // The initializer clears these enums; assign the coordinate contract afterwards.
+    m_CoordinateSystem.handedness = Side::Side_Right;
+    m_CoordinateSystem.up = AxisPolarity::AxisPolarity_PositiveZ;
+    m_CoordinateSystem.view = AxisView::AxisView_XFromViewer;
+    m_CoordinateSystem.unitScale = 1.0f; // metres
     const SDKReturnCode t_CoordinateResult = CoreSdk_InitializeCoordinateSystemWithVUH(m_CoordinateSystem, m_WorldSpace);
     if (t_CoordinateResult != SDKReturnCode::SDKReturnCode_Success) {
         return ClientReturnCode::ClientReturnCode_FailedToInitialize;
