@@ -303,6 +303,64 @@ def test_stop_flag_uses_owner_cleanup_and_never_retries(setup):
     assert backend.calls[-1][0] == "close"
 
 
+def test_warning_on_final_hold_sleep_cannot_pass(setup):
+    backend, _, _ = setup
+    backend.warning_at = .005 + 3.0
+    report = run(setup, hold=True)
+    assert not report["completed"] and not report["static_completed"]
+    assert report["raw_error_frame_count"] == 1
+    matching = [error for error in report["errors"] if "Raw nonzero joint" in error]
+    assert len(matching) == 1 and "nid=13, code=0x0003" in matching[0]
+    assert report["disabled_confirmed"] and report["closed"]
+
+
+@pytest.mark.parametrize("failure", ["warning", "copy"])
+def test_raw_failure_during_disable_cannot_turn_into_success(setup, failure):
+    backend, _, _ = setup
+    disable = backend.disable
+
+    def disable_with_event():
+        disable()
+        if failure == "warning":
+            backend.events.append({"error_joints": [{"nid": 13, "error_code_current": 3}]})
+        else:
+            backend.copy_error_count = 1
+
+    backend.disable = disable_with_event
+    report = run(setup, hold=True)
+    assert report["static_completed"] and not report["completed"]
+    assert report["disabled_confirmed"] and report["closed"]
+    expected = "Raw nonzero joint" if failure == "warning" else "Raw diagnostics copy failed"
+    assert sum(expected in error for error in report["errors"]) == 1
+
+
+def test_measured_drift_on_final_sleep_cannot_pass(setup):
+    backend, _, clock = setup
+    sleep = backend.sleep
+
+    def sleep_with_final_drift(seconds):
+        sleep(seconds)
+        if (backend.enabled and backend.first_enabled_feedback_at is not None
+                and clock() >= backend.first_enabled_feedback_at + 3.0):
+            backend.data = Snapshot(StateSample(clock(), (.51,) * 20, (0.0,) * 20),
+                                    backend.data.diagnostics)
+
+    backend.sleep = sleep_with_final_drift
+    report = run(setup, hold=True)
+    assert not report["completed"] and not report["static_completed"]
+    assert report["max_observed_drift_rad"] == pytest.approx(.11)
+    assert any("Measured motion exceeded" in error for error in report["errors"])
+    assert report["disabled_confirmed"] and report["closed"]
+
+
+def test_stop_flag_on_final_sleep_cannot_pass(setup):
+    backend, _, clock = setup
+    report = run(setup, hold=True, stop_requested=lambda: clock() >= .005 + 3.0)
+    assert not report["completed"] and not report["static_completed"]
+    assert any("Stop signal received" in error for error in report["errors"])
+    assert report["disabled_confirmed"] and report["closed"]
+
+
 def test_raw_evidence_keeps_all_fault_nids_codes_flags_and_comm_fields():
     def joint(nid, error):
         return NS(nid=nid, error_code_current=error, current=.1, vbus_v_fb=12.4,

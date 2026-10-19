@@ -71,6 +71,18 @@ def raw_diagnostic_frame(frame, received_at):
     })
 
 
+def raw_failure_reasons(evidence):
+    reasons = []
+    if evidence.get("raw_copy_error_count", 0):
+        reasons.append("Raw diagnostics copy failed: " + evidence.get("raw_copy_error", "unknown error"))
+    if evidence.get("raw_error_frame_count", 0):
+        events = evidence.get("raw_error_frames", ())
+        joints = events[0].get("error_joints", ()) if events else ()
+        detail = "; ".join(f"nid={j['nid']}, code=0x{j['error_code_current']:04X}" for j in joints)
+        reasons.append("Raw nonzero joint warning/error event latched: " + detail)
+    return reasons
+
+
 class RecordingBackend(SdkBackend):
     def __init__(self, **kwargs):
         super().__init__(RIGHT_SERIAL, "right", **kwargs)
@@ -172,16 +184,12 @@ def run_probe(backend, limits, *, hold=False, extension_rad=0.0, max_velocity=CO
     def require_raw_evidence():
         evidence = backend.evidence()
         raw = evidence.get("latest_raw_diagnostics")
-        if evidence.get("raw_copy_error_count", 0):
-            raise RuntimeError("Raw diagnostics copy failed: " + evidence.get("raw_copy_error", "unknown error"))
+        problems = raw_failure_reasons(evidence)
+        if problems:
+            raise RuntimeError(problems[0])
         if (raw is None or raw.get("num_joints") != 20 or len(raw.get("joints", ())) != 20
                 or not 0 <= clock() - raw["received_at"] <= config.diagnostics_timeout):
             raise RuntimeError("Fresh complete raw diagnostic evidence is required before enabling")
-        if evidence.get("raw_error_frame_count", 0):
-            events = evidence.get("raw_error_frames", ())
-            joints = events[0].get("error_joints", ()) if events else ()
-            detail = "; ".join(f"nid={j['nid']}, code=0x{j['error_code_current']:04X}" for j in joints)
-            raise RuntimeError("Raw nonzero joint warning/error event latched: " + detail)
 
     def check_abort():
         if stop_requested():
@@ -210,6 +218,9 @@ def run_probe(backend, limits, *, hold=False, extension_rad=0.0, max_velocity=CO
             if not hold and snapshot.diagnostics and any(j.ext_state == 2 for j in snapshot.diagnostics.joints):
                 raise RuntimeError("Read-only probe observed enabled joints; no hardware action taken")
             sleep(period)
+        # The final sleep can deliver a warning, stop request, or measured
+        # motion beyond the cap exactly as the phase deadline is reached.
+        check_abort()
 
     try:
         check_abort()
@@ -318,7 +329,14 @@ def run_probe(backend, limits, *, hold=False, extension_rad=0.0, max_velocity=CO
                 except Exception as exc:
                     report["errors"].append(f"Close: {exc}")
         if hasattr(backend, "evidence"):
-            report.update(backend.evidence())
+            evidence = backend.evidence()
+            report.update(evidence)
+            # Include callbacks received during disable confirmation and close.
+            # Fresh disabled feedback does not turn a recorded warning into a pass.
+            for reason in raw_failure_reasons(evidence):
+                report["completed"] = False
+                if not any(reason in error for error in report["errors"]):
+                    report["errors"].append(reason)
     return json_safe(report)
 
 
