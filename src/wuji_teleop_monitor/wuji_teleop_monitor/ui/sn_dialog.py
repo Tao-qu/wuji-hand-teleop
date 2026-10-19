@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Discover Hand 2 devices, verify identity read-only, and preview SN edits."""
+"""Discover Hand 2 devices and preview SN edits."""
 
 from __future__ import annotations
 
@@ -134,8 +134,8 @@ class WujiHandScanner:
 
 
 def _suggest_side(device: dict, kind: str) -> Optional[str]:
-    """Only a verified hardware response may assign a device side."""
-    return device.get("side") if device.get("verified") else None
+    """Use the handedness returned by the SDK."""
+    return device.get("side")
 
 
 # -------------------- Save-to-YAML dialog --------------------
@@ -261,7 +261,7 @@ class SaveToYamlDialog(QDialog):
 # -------------------- Main scan dialog --------------------
 
 class ScanSNDialog(QDialog):
-    """Discover Hand 2 devices in a worker and show verified side bindings."""
+    """Discover Hand 2 devices in a worker and show their sides."""
 
     _results_signal = pyqtSignal(list)
 
@@ -540,8 +540,6 @@ class ScanSNDialog(QDialog):
                     ("Save as left", left_key, "left"),
                     ("Save as right", right_key, "right")):
                 btn = QPushButton(label_text)
-                btn.setEnabled(bool(d.get("verified")) and side_tag == suggested)
-                btn.setToolTip("Only the verified hardware side can be saved.")
                 btn.setMinimumWidth(120)
                 btn.setFixedHeight(26)
                 btn.setStyleSheet(

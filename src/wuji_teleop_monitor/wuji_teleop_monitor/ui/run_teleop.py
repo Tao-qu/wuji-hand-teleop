@@ -27,7 +27,7 @@ from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter
 from PyQt5.QtSvg import QSvgRenderer
 
 from .joint_panel import JointDisplayPanel
-from .hand2_support import FINGERS, HandHealth, ordered_positions
+from .hand2_support import FINGERS, ordered_positions
 from .sn_dialog import ScanSNDialog
 from .theme import DARK_THEME_CSS, LOG_TEXTEDIT_CSS
 
@@ -111,10 +111,8 @@ class TeleopLauncherUI(QMainWindow):
         self._arm_lifecycle = None
         self._hand_seen = {}
         self._hand_commands_seen = {}
-        self._health_lock = threading.Lock()
-        self._hand_health = {side: HandHealth() for side in ('left', 'right')}
+        self._hand_lifecycle = {side: '' for side in ('left', 'right')}
         self._enable_clients = {}
-        self._pending_services = {}
         self._waiting_for_arm_lifecycle = False
 
         self._state_signal.connect(self._set_state)
@@ -418,44 +416,20 @@ class TeleopLauncherUI(QMainWindow):
     def _on_hand_state(self, side, msg):
         now = time.monotonic()
         positions = ordered_positions(side, list(msg.name), list(msg.position))
-        with self._health_lock:
-            self._hand_health[side].feedback_at = now
-            self._hand_health[side].complete_feedback = all(math.isfinite(q) for q in positions)
         self._hand_seen[side] = now
         self._joint_panel.update_hand_joints(side, positions)
 
     def _on_hand_command(self, side):
         now = time.monotonic()
-        with self._health_lock:
-            self._hand_health[side].commands_at = now
         self._hand_commands_seen[side] = now
         self._joint_panel.record_hz(f'{side}_hand')
 
     def _on_hand_diagnostics(self, side, msg):
-        """Cache health and current from the driver's diagnostics contract."""
+        """Display motor current from the driver diagnostics."""
         statuses = [status for status in msg.status if status.name.startswith(f'{side}_hand/')]
         if not statuses:
             return
         currents = [math.nan] * 20
-        summary = next((status for status in statuses if status.name == f'{side}_hand/hand'), None)
-        summary_values = {value.key: value.value for value in summary.values} if summary else {}
-        counts = {}
-        for key in ('enabled_joint_count', 'online_joint_count'):
-            try:
-                value = int(summary_values[key])
-                counts[key] = value if 0 <= value <= 20 else None
-            except (KeyError, TypeError, ValueError):
-                counts[key] = None
-        with self._health_lock:
-            health = self._hand_health[side]
-            health.diagnostics_at = time.monotonic()
-            health.diagnostic_level = max(int(status.level) for status in statuses)
-            health.enabled_joint_count = counts['enabled_joint_count']
-            health.online_joint_count = counts['online_joint_count']
-            errors = [status.message for status in statuses if status.level >= 2]
-            health.detail = "; ".join(errors[:2])
-            if len(errors) > 2:
-                health.detail += f' (+{len(errors) - 2} more)'
         for status in statuses:
             values = {value.key: value.value for value in status.values}
             label = status.name.rsplit('/', 1)[-1]
@@ -470,29 +444,18 @@ class TeleopLauncherUI(QMainWindow):
 
     def _on_hand_lifecycle_main(self, side, lifecycle):
         lifecycle = lifecycle.strip().upper()
-        with self._health_lock:
-            previous = self._hand_health[side].lifecycle
-            self._hand_health[side].lifecycle = lifecycle
+        previous = self._hand_lifecycle[side]
+        self._hand_lifecycle[side] = lifecycle
         if previous != lifecycle:
             self._emit_output(f'>>> {side}_hand/lifecycle_state: {lifecycle}')
         self._poll_process_alive()
 
     def _request_enabled(self, chain, enabled):
-        """Only an explicit button press may invoke a controller enable service."""
+        """Forward the requested motor state to the driver."""
         client = self._enable_clients.get(chain)
         if client is None or not client.service_is_ready():
             self._emit_output(f'>>> {chain}: set_enabled service is unavailable')
             return
-        if chain in self._pending_services:
-            return
-        if enabled and chain == 'arms':
-            reply = QMessageBox.warning(
-                self, 'Enable arms',
-                'The arms will move to their initial pose and enter impedance mode.\n'
-                'Keep the workspace clear and the e-stop within reach.',
-                QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Cancel)
-            if reply != QMessageBox.Ok:
-                return
         request = SetBool.Request()
         request.data = enabled
         try:
@@ -500,9 +463,6 @@ class TeleopLauncherUI(QMainWindow):
         except Exception as exc:
             self._emit_output(f'>>> {chain}: service request failed: {exc}')
             return
-        self._pending_services[chain] = (future, time.monotonic())
-        self._enable_buttons[chain].setEnabled(False)
-        self._disable_buttons[chain].setEnabled(False)
         self._emit_output(f'>>> {chain}: requested {"enable" if enabled else "disable"}')
 
         def completed(result):
@@ -514,7 +474,6 @@ class TeleopLauncherUI(QMainWindow):
         future.add_done_callback(completed)
 
     def _on_service_result(self, chain, success, message):
-        self._pending_services.pop(chain, None)
         self._emit_output(f'>>> {chain}: {"accepted" if success else "failed"}: {message}')
         self._poll_process_alive()
 
@@ -577,9 +536,6 @@ class TeleopLauncherUI(QMainWindow):
                 label.setText(f'{chain.title()}: stopped')
                 self._enable_buttons[chain].setEnabled(False)
                 self._disable_buttons[chain].setEnabled(False)
-            for future, _started in self._pending_services.values():
-                future.cancel()
-            self._pending_services.clear()
         elif state == "running":
             if self._start_time is None:
                 self._start_time = self._launch_started_at or time.monotonic()
@@ -623,12 +579,7 @@ class TeleopLauncherUI(QMainWindow):
         if self._process is None or self._process.poll() is not None:
             return
         args = LAUNCH_CONFIGS[self._preset_combo.currentText()]
-        now = time.monotonic()
-        startup_grace = self._state == 'starting' and now - (self._launch_started_at or now) < 30.0
         outcomes = []
-        for chain, (_future, started) in list(self._pending_services.items()):
-            if now - started > 30.0:
-                self._chain_labels[chain].setText(f'{chain.title()}: service response overdue; inspect backend')
         if "enable_arm:=true" in args:
             lc = self._arm_lifecycle
             if lc == _LC_READY:
@@ -637,33 +588,25 @@ class TeleopLauncherUI(QMainWindow):
                 outcome = 'ready'
             elif lc in (_LC_ENABLE_FAILED, _LC_SDK_ERROR):
                 outcome = 'error'
-            elif lc == _LC_ENABLING:
-                outcome = 'enabling'
             else:
                 outcome = 'waiting'
             outcomes.append(outcome)
             self._chain_labels['arms'].setText(f'Arms: {_LC_NAMES.get(lc, "waiting for driver")}')
-            self._update_enable_buttons('arms', lc == _LC_DISABLED, lc == _LC_READY)
+            self._update_enable_buttons('arms')
         if "enable_hand:=true" in args:
             for side in ('left', 'right'):
-                with self._health_lock:
-                    health = self._hand_health[side]
-                    outcome, detail = health.assess(now)
-                    lifecycle = health.lifecycle
-                    enabled_joint_count = health.enabled_joint_count
-                self._chain_labels[side].setText(f'{side.title()} Hand 2: {detail}')
+                lifecycle = self._hand_lifecycle[side]
+                outcome = {'ACTIVE': 'active', 'READY': 'ready', 'STOPPED': 'ready',
+                           'FAULT': 'error', 'DISCONNECTED': 'error'}.get(lifecycle, 'waiting')
+                self._chain_labels[side].setText(f'{side.title()} Hand 2: {lifecycle or "waiting for driver"}')
                 color = '#C62828' if outcome == 'error' else '#4CAF50' if outcome == 'active' else '#FFB74D'
                 self._chain_labels[side].setStyleSheet(f'color: {color};')
-                self._update_enable_buttons(side, lifecycle == 'STOPPED' and outcome == 'ready',
-                                            lifecycle in ('ENABLING', 'READY', 'ACTIVE', 'FAULT') or
-                                            lifecycle == 'STOPPED' and enabled_joint_count != 0)
-                if startup_grace and outcome == 'error' and lifecycle not in ('FAULT', 'DISCONNECTED'):
-                    outcome = 'waiting'
+                self._update_enable_buttons(side)
                 outcomes.append(outcome)
         if 'error' in outcomes:
             state = 'error'
         elif 'waiting' in outcomes:
-            state = 'starting' if startup_grace else 'error'
+            state = 'starting'
         elif outcomes and all(outcome == 'active' for outcome in outcomes):
             state = 'running'
         else:
@@ -671,11 +614,11 @@ class TeleopLauncherUI(QMainWindow):
         if state != self._state:
             self._set_state(state)
 
-    def _update_enable_buttons(self, chain, can_enable, can_disable):
+    def _update_enable_buttons(self, chain):
         client = self._enable_clients.get(chain)
-        available = client is not None and client.service_is_ready() and chain not in self._pending_services
-        self._enable_buttons[chain].setEnabled(available and can_enable)
-        self._disable_buttons[chain].setEnabled(available and can_disable)
+        available = client is not None and client.service_is_ready()
+        self._enable_buttons[chain].setEnabled(available)
+        self._disable_buttons[chain].setEnabled(available)
 
     # -------------------- Launch --------------------
 
@@ -703,10 +646,17 @@ class TeleopLauncherUI(QMainWindow):
             return
 
         preset = self._preset_combo.currentText()
+        if _preset_waits_for_arm_lifecycle(preset):
+            reply = QMessageBox.warning(
+                self, 'Start arms',
+                'The arms will move to their initial pose and enter impedance mode.\n'
+                'Keep the workspace clear and the e-stop within reach.',
+                QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Cancel)
+            if reply != QMessageBox.Ok:
+                return
         self._hand_seen.clear()
         self._hand_commands_seen.clear()
-        with self._health_lock:
-            self._hand_health = {side: HandHealth() for side in ('left', 'right')}
+        self._hand_lifecycle = {side: '' for side in ('left', 'right')}
         self._waiting_for_arm_lifecycle = _preset_waits_for_arm_lifecycle(preset)
         self._arm_lifecycle = None
         cmd = self._build_launch_cmd(preset)

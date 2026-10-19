@@ -6,7 +6,6 @@
 #include <thread>
 #include "rclcpp/qos.hpp"
 #include <chrono>
-#include <cmath>
 
 #include "ClientLogging.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -20,10 +19,6 @@ ManusDataPublisher::ManusDataPublisher() : Node("manus_data_publisher")
 {
     if (s_Instance != nullptr) {
         throw std::runtime_error("This can only be initialized once.");
-    }
-    m_SourceTimeout = declare_parameter<double>("source_timeout", 0.20);
-    if (!std::isfinite(m_SourceTimeout) || m_SourceTimeout <= 0.0) {
-        throw std::invalid_argument("source_timeout must be finite and positive");
     }
     m_LeftCalibrationFile = declare_parameter<std::string>("left_calibration_file", "");
     m_RightCalibrationFile = declare_parameter<std::string>("right_calibration_file", "");
@@ -242,20 +237,17 @@ void ManusDataPublisher::PublishCallback()
 
     for (size_t i = 0; i < m_Landscape->gloveDevices.gloveCount; i++)
     {
-        // Calibration must be accepted for this exact glove before publishing.
+        // Auto-load calibration file once per hand.
         const uint32_t t_GloveId = m_Landscape->gloveDevices.gloves[i].id;
         const Side t_Side = m_Landscape->gloveDevices.gloves[i].side;
-        const auto t_CheckNow = std::chrono::steady_clock::now();
-        const auto t_Loaded = m_CalibrationLoaded.find(t_GloveId);
-        if (t_Loaded == m_CalibrationLoaded.end() || t_Loaded->second != t_Side) {
-            if (t_CheckNow < m_CalibrationRetryAt[t_GloveId]) continue;
-            m_CalibrationRetryAt[t_GloveId] = t_CheckNow + std::chrono::seconds(2);
+        if (t_Side == Side_Left && !m_LeftCalibrationLoaded) {
             if (LoadCalibrationFile(t_GloveId, t_Side)) {
-                m_CalibrationLoaded[t_GloveId] = t_Side;
-                m_CalibrationAppliedAt[t_GloveId] = std::chrono::steady_clock::now();
+                m_LeftCalibrationLoaded = true;
             }
-            // This snapshot predates loading, even when the SDK accepted it.
-            continue;
+        } else if (t_Side == Side_Right && !m_RightCalibrationLoaded) {
+            if (LoadCalibrationFile(t_GloveId, t_Side)) {
+                m_RightCalibrationLoaded = true;
+            }
         }
 
         manus_ros2_msgs::msg::ManusGlove t_Msg;
@@ -268,21 +260,10 @@ void ManusDataPublisher::PublishCallback()
         }
 
         const ClientRawSkeleton& t_RawSkel = t_GloveDataMap.at(t_Msg.glove_id);
-        // The timer must not turn a frozen cached skeleton into fresh ROS data.
-        const double t_SourceAge = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - t_RawSkel.received_at).count();
-        if (t_RawSkel.info.nodesCount == 0 || t_RawSkel.sequence == 0 ||
-            t_RawSkel.sequence <= m_LastPublishedSequence[t_Msg.glove_id] ||
-            t_SourceAge < 0.0 || t_SourceAge >= m_SourceTimeout ||
-            t_RawSkel.received_at <= m_CalibrationAppliedAt[t_GloveId]) {
-            continue;
-        }
+        if (t_RawSkel.info.nodesCount == 0) continue;
         // Metadata belongs to this glove and is indexed by nodeId, never offset.
         auto& t_Metadata = m_NodeInfoByGlove[t_GloveId];
-        if (!manus_tools::matches_raw_nodes(t_Metadata, t_RawSkel.nodes)) {
-            t_Metadata.clear();
-            if (t_CheckNow < m_MetadataRetryAt[t_GloveId]) continue;
-            m_MetadataRetryAt[t_GloveId] = t_CheckNow + std::chrono::seconds(2);
+        if (t_Metadata.empty()) {
             std::vector<NodeInfo> t_Info(t_RawSkel.info.nodesCount);
             const auto t_Result = CoreSdk_GetRawSkeletonNodeInfoArray(
                 t_GloveId, t_Info.data(), static_cast<uint32_t>(t_Info.size()));
@@ -290,16 +271,7 @@ void ManusDataPublisher::PublishCallback()
                 ClientLog::error("Hierarchy query failed for glove {}: {}", t_GloveId, static_cast<int>(t_Result));
                 continue;
             }
-            try {
-                t_Metadata = manus_tools::index_metadata(t_Info);
-                if (!manus_tools::matches_raw_nodes(t_Metadata, t_RawSkel.nodes)) {
-                    throw std::runtime_error("MANUS hierarchy/raw node IDs differ");
-                }
-            } catch (const std::exception& e) {
-                t_Metadata.clear();
-                ClientLog::error("Invalid hierarchy for glove {}: {}", t_GloveId, e.what());
-                continue;
-            }
+            t_Metadata = manus_tools::index_metadata(t_Info);
         }
         t_Msg.header = t_RawSkel.header;
         t_Msg.header.frame_id = "manus_" + t_Msg.side;
@@ -309,9 +281,9 @@ void ManusDataPublisher::PublishCallback()
         for (const auto &node: t_RawSkel.nodes) {
             manus_ros2_msgs::msg::ManusRawNode t_Node;
             t_Node.node_id = node.id;
-            t_Node.parent_node_id = t_Metadata.at(node.id).parentId;
-            t_Node.joint_type = JointTypeToString(t_Metadata.at(node.id).fingerJointType);
-            t_Node.chain_type = ChainTypeToString(t_Metadata.at(node.id).chainType);
+            t_Node.parent_node_id = t_Metadata[node.id].parentId;
+            t_Node.joint_type = JointTypeToString(t_Metadata[node.id].fingerJointType);
+            t_Node.chain_type = ChainTypeToString(t_Metadata[node.id].chainType);
 
             ManusVec3 t_Pos = node.transform.position;
             ManusQuaternion t_Rot = node.transform.rotation;
@@ -394,7 +366,6 @@ void ManusDataPublisher::PublishCallback()
         
         if (t_Publisher->second) {
             t_Publisher->second->publish(t_Msg);
-            m_LastPublishedSequence[t_Msg.glove_id] = t_RawSkel.sequence;
         }
         
         m_PublishCountMap[t_Msg.glove_id]++;
@@ -473,32 +444,18 @@ ClientReturnCode ManusDataPublisher::Connect()
 /// The data is not directly passed to the callback, but needs to be retrieved from the SDK for it to be used. This is demonstrated in the function below.
 void ManusDataPublisher::OnRawSkeletonStreamCallback(const SkeletonStreamInfo *const p_RawSkeletonStreamInfo)
 {
-    if (!s_Instance || !p_RawSkeletonStreamInfo) return;
+    if (!s_Instance) return;
 
-    // Timestamp callback entry before waiting or acquiring SDK data. A callback
-    // already in flight when calibration finishes must not become a fresh frame.
-    const auto t_ReceivedAt = std::chrono::steady_clock::now();
+    // Retain callback acquisition metadata on the cached skeleton.
     const auto t_RosStamp = s_Instance->get_clock()->now();
     std::lock_guard<std::mutex> lock(s_Instance->m_RawSkeletonMutex);
     for (uint32_t i = 0; i < p_RawSkeletonStreamInfo->skeletonsCount; i++) {
         ClientRawSkeleton t_Next;
-        if (CoreSdk_GetRawSkeletonInfo(i, &t_Next.info) != SDKReturnCode_Success ||
-            t_Next.info.nodesCount == 0) {
-            continue;
-        }
+        CoreSdk_GetRawSkeletonInfo(i, &t_Next.info);
         auto previous = s_Instance->m_GloveDataMap.find(t_Next.info.gloveId);
-        // Repeated nonzero SDK publish timestamps identify a cached SDK frame.
-        if (previous != s_Instance->m_GloveDataMap.end() &&
-            p_RawSkeletonStreamInfo->publishTime.time != 0 &&
-            previous->second.info.publishTime.time == p_RawSkeletonStreamInfo->publishTime.time) {
-            continue;
-        }
         t_Next.nodes.resize(t_Next.info.nodesCount);
-        if (CoreSdk_GetRawSkeletonData(i, t_Next.nodes.data(), t_Next.info.nodesCount) != SDKReturnCode_Success) {
-            continue;
-        }
+        CoreSdk_GetRawSkeletonData(i, t_Next.nodes.data(), t_Next.info.nodesCount);
         t_Next.info.publishTime = p_RawSkeletonStreamInfo->publishTime;
-        t_Next.received_at = t_ReceivedAt;
         t_Next.header.stamp = t_RosStamp;
         t_Next.sequence = previous == s_Instance->m_GloveDataMap.end()
             ? 1 : previous->second.sequence + 1;
@@ -704,8 +661,8 @@ bool ManusDataPublisher::LoadCalibrationFile(uint32_t p_GloveId, Side p_Side)
     // Get file size (guard against tellg() failure which returns -1)
     t_File.seekg(0, std::ios::end);
     std::streampos t_FilePos = t_File.tellg();
-    if (t_FilePos <= 0 || t_FilePos > 16 * 1024 * 1024) {
-        ClientLog::error("Invalid calibration file size (must be 1 byte to 16 MiB): {}", t_CalibrationPath);
+    if (t_FilePos <= 0) {
+        ClientLog::error("Failed to determine size of calibration file (or file empty): {}", t_CalibrationPath);
         return false;
     }
     int t_FileLength = static_cast<int>(t_FilePos);
@@ -723,16 +680,15 @@ bool ManusDataPublisher::LoadCalibrationFile(uint32_t p_GloveId, Side p_Side)
 
     // Apply calibration data
     SetGloveCalibrationReturnCode t_Result = SetGloveCalibrationReturnCode_Error;
-    const SDKReturnCode t_SdkResult = CoreSdk_SetGloveCalibration(
-        p_GloveId, t_CalibrationData.data(), t_FileLength, &t_Result);
+    CoreSdk_SetGloveCalibration(p_GloveId, t_CalibrationData.data(), t_FileLength, &t_Result);
 
-    if (t_SdkResult == SDKReturnCode_Success && t_Result == SetGloveCalibrationReturnCode_Success) {
+    if (t_Result == SetGloveCalibrationReturnCode_Success) {
         ClientLog::print("Calibration loaded successfully for {} glove (ID: {})",
             p_Side == Side_Left ? "Left" : "Right", p_GloveId);
         return true;
     } else {
-        ClientLog::error("Failed to load calibration for glove ID: {}, SDK code: {}, calibration code: {}",
-            p_GloveId, static_cast<int>(t_SdkResult), static_cast<int>(t_Result));
+        ClientLog::error("Failed to load calibration for glove ID: {}, error code: {}",
+            p_GloveId, static_cast<int>(t_Result));
         return false;
     }
 }

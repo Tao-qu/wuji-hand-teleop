@@ -12,7 +12,7 @@ setup(
     zip_safe=True,
     maintainer="Teleoperation maintainers",
     maintainer_email="support@wuji.tech",
-    description="Guarded adapter for official wuji-sdk 2026.10.12 and Hand 2 firmware 2.5.1",
+    description="ROS 2 adapter for the official Wuji Hand 2 SDK",
     license="MIT",
     entry_points={"console_scripts": [
         "wuji_hand2_driver = wuji_hand2_driver.driver_node:main",

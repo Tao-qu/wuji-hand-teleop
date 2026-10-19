@@ -16,42 +16,31 @@ def _enabled(context, name):
 
 def _nodes(context):
     hand, arm = _enabled(context, "enable_hand"), _enabled(context, "enable_arm")
-    if not (hand or arm):
-        raise ValueError("Enable at least one of enable_hand or enable_arm")
     nodes = []
     if hand:
         path = LaunchConfiguration("hand_config").perform(context)
         path = path or resolve_config_path("wujihand_output", "hand2.yaml")
         with open(path) as stream:
             config = yaml.safe_load(stream)
-        read_only = _enabled(context, "hand_read_only")
         selection = LaunchConfiguration("hand_side").perform(context)
         sides = ("left", "right") if selection == "both" else (selection,)
-        serials = [str(config[f"{side}_hand"]["serial_number"]) for side in sides]
-        names = [config[f"{side}_hand"].get("name", f"{side}_hand") for side in sides]
-        if len(set(serials)) != len(serials) or len(set(names)) != len(names):
-            raise ValueError("Each hand must have a distinct serial number and namespace")
-        if not read_only:
-            nodes.append(Node(package="manus_ros2", executable="manus_data_publisher", output="screen",
-                              parameters=[config.get("manus", {})]))
+        nodes.append(Node(package="manus_ros2", executable="manus_data_publisher", output="screen",
+                          parameters=[config.get("manus", {})]))
         for side in sides:
             cfg = config[f"{side}_hand"]
             serial = str(cfg["serial_number"])
-            if not serial or serial.startswith("YOUR_"):
-                raise ValueError(f"Configure {side}_hand.serial_number in {path}")
             name = cfg.get("name", f"{side}_hand")
             nodes.append(Node(
                 package="wuji_hand2_driver", executable="wuji_hand2_driver",
                 name="wuji_hand2_driver", namespace=name, output="screen",
                 parameters=[dict(config.get("driver", {}), serial_number=serial,
-                                 expected_side=side, read_only=read_only,
-                                 auto_enable=_enabled(context, "hand_auto_enable") and not read_only)]))
-            if not read_only:
-                nodes.append(Node(
-                    package="controller", executable="wujihand_controller",
-                    name=f"wujihand_controller_{side}", output="screen",
-                    parameters=[config.get("controller", {})],
-                    arguments=["--side", side, "--hand-name", name]))
+                                 expected_side=side,
+                                 auto_enable=_enabled(context, "hand_auto_enable"))]))
+            nodes.append(Node(
+                package="controller", executable="wujihand_controller",
+                name=f"wujihand_controller_{side}", output="screen",
+                parameters=[config.get("controller", {})],
+                arguments=["--side", side, "--hand-name", name]))
     if arm:
         nodes.append(Node(package="openvr_input", executable="openvr_input", output="screen",
                           arguments=["-c", resolve_config_path("openvr_input", "openvr_input.yaml")]))
@@ -72,8 +61,7 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_rviz", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("hand_config", default_value="", description="Optional hand hardware YAML"),
         DeclareLaunchArgument("hand_side", default_value="both", choices=["both", "left", "right"]),
-        DeclareLaunchArgument("hand_read_only", default_value="false", choices=["true", "false"]),
-        DeclareLaunchArgument("hand_auto_enable", default_value="false", choices=["true", "false"]),
-        DeclareLaunchArgument("arm_auto_enable", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("hand_auto_enable", default_value="true", choices=["true", "false"]),
+        DeclareLaunchArgument("arm_auto_enable", default_value="true", choices=["true", "false"]),
         OpaqueFunction(function=_nodes),
     ])

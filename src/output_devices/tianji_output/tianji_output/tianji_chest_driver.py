@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Tianji chest-frame driver for Cartesian IK and direct joint commands.
 
-Configuration supplies the initial pose and tool parameters. Tool geometry
-is applied in the kinematics SDK; tool dynamics are managed on the cabinet.
+Configuration supplies the initial pose, tool geometry, and payload source.
 """
 try:
     from tianji_output._internal.fx_robot import Marvin_Robot
@@ -15,37 +14,11 @@ except ImportError:
     from ._internal.structure_data import DCSS
     from .fault_codes import describe_fault_codes, read_servo_fault_codes
 import time
-import math
 import logging
 import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from .tool_parameters import apply_tool_parameters, tool_transform
-from .feedback_guard import (ArmJointLimits, DualArmFeedbackGuard, check_motion_allowed,
-                             guarded_wait, joint_vector, pose_mm, confirm_standby, disable_and_release)
-
-
-def _checked_mode_command(robot, method, **arguments):
-    """Check native command acceptance; mode completion uses cabinet feedback."""
-    result = getattr(robot, method)(**arguments)
-    if result is not True and not (type(result) is int and result == 1):
-        arm = f" arm={arguments['arm']}" if 'arm' in arguments else ''
-        raise RuntimeError(f'Tianji mode command {method}{arm} was not accepted: {result!r}')
-
-
-def _impedance_entry_pose(robot, feedback_guard):
-    """Use one fresh snapshot for both the state precondition and hold pose."""
-    snapshot = robot.subscribe(DCSS())
-    positions = feedback_guard.observe(snapshot)
-    states = snapshot.get('states')
-    if (not isinstance(states, (list, tuple)) or len(states) != 2 or any(
-            not isinstance(state, dict)
-            or type(state.get('cur_state')) is not int
-            or type(state.get('err_code')) is not int
-            or state['cur_state'] not in (0, 1, 3) or state['err_code'] != 0
-            for state in states)):
-        raise RuntimeError(f'Impedance entry requires fault-free non-transition states 0/1/3: {states}')
-    return positions
 
 
 class TianjiChestDriver:
@@ -84,15 +57,13 @@ class TianjiChestDriver:
         with open(yaml_path, 'r') as f:
             cfg = yaml.safe_load(f)
         self._tool_config = cfg
-        left_tool = tool_transform(cfg, "left")
-        right_tool = tool_transform(cfg, "right")
 
         init_joints = cfg.get('init_joints')
         if not init_joints or 'left' not in init_joints or 'right' not in init_joints:
             raise ValueError(
                 f"tianji_chest.yaml missing init_joints.left/right: {yaml_path}")
-        self._init_joints_left = joint_vector(init_joints['left'], 'left init joints')
-        self._init_joints_right = joint_vector(init_joints['right'], 'right init joints')
+        self._init_joints_left = list(init_joints['left'])
+        self._init_joints_right = list(init_joints['right'])
 
         # Resolve kinematics config path
         if config_path is None:
@@ -116,8 +87,7 @@ class TianjiChestDriver:
             pnva=config_result['PNVA'][0],
             j67=config_result['BD'][0]
         )
-        # Apply the configured tool geometry in the kinematics SDK.
-        self.kine_left.set_tool_kine(0, left_tool)
+        self.kine_left.set_tool_kine(0, tool_transform(cfg, 'left'))
 
         self.logger.debug("[arm B] Initializing kinematics SDK...")
         self.kine_right = Marvin_Kine()
@@ -130,10 +100,7 @@ class TianjiChestDriver:
             pnva=config_result['PNVA'][1],
             j67=config_result['BD'][1]
         )
-        self.kine_right.set_tool_kine(1, right_tool)
-        self._joint_limits = ArmJointLimits(config_result['PNVA'])
-        self._joint_limits.validate('left', self._init_joints_left)
-        self._joint_limits.validate('right', self._init_joints_right)
+        self.kine_right.set_tool_kine(1, tool_transform(cfg, 'right'))
 
         # ---------------------- Robot connection ----------------------
         self.logger.debug("Initializing robot control...")
@@ -143,6 +110,11 @@ class TianjiChestDriver:
         if init == 0:
             raise ConnectionError("Connection failed: port in use")
 
+        time.sleep(0.5)
+        self.robot.clear_set()
+        self.robot.clear_error('A')
+        self.robot.clear_error('B')
+        self.robot.send_cmd()
         time.sleep(0.5)
 
         if not self._verify_connection():
@@ -160,28 +132,29 @@ class TianjiChestDriver:
         self.zsp_angle = 0.0                         # nullspace arm-angle rotation
         self.dgr = [5.0, 5.0, 5.0]                   # singularity tolerance (deg)
 
-        # Preserve cabinet payload unless measured replacement values are configured.
+        # Tool dynamic parameters (Wuji Hand)
         self._set_tool_params()
 
         self.logger.info("Dual-arm controller initialized")
 
     def _set_tool_params(self):
-        """Apply the configured cabinet tool-dynamics policy."""
+        """Apply the configured cabinet tool-dynamics source."""
         self._active_tool_dynamics = apply_tool_parameters(self.robot, self._tool_config, self.logger)
         time.sleep(0.3)
 
     def _verify_connection(self):
-        """Require advancing, complete feedback from both cabinet arms."""
+        """Sanity check: subscribe a few times, look for frame_serial advancing."""
         dcss = DCSS()
-        self._feedback_guard = DualArmFeedbackGuard()
-        for _ in range(20):
-            try:
-                self._feedback_guard.observe(self.robot.subscribe(dcss))
-                return True
-            except ValueError:
-                pass
+        motion_tag = 0
+        frame_update = None
+        for i in range(5):
+            sub_data = self.robot.subscribe(dcss)
+            serial = sub_data['outputs'][0]['frame_serial']
+            if serial != 0 and frame_update != serial:
+                motion_tag += 1
+                frame_update = serial
             time.sleep(0.1)
-        return False
+        return motion_tag > 0
 
     # ==================== State queries ====================
 
@@ -189,7 +162,9 @@ class TianjiChestDriver:
         """Return (left_joints, right_joints), each 7 joint angles in degrees."""
         dcss = DCSS()
         sub_data = self.robot.subscribe(dcss)
-        return self._feedback_guard.observe(sub_data)
+        left_joints = sub_data["outputs"][0]["fb_joint_pos"]
+        right_joints = sub_data["outputs"][1]["fb_joint_pos"]
+        return left_joints, right_joints
 
     def get_current_joint_velocities(self):
         """Return (left_velocities, right_velocities), each 7 joint velocities in deg/s."""
@@ -225,21 +200,10 @@ class TianjiChestDriver:
         }
 
     def get_arm_states_only(self):
-        """Return (left_cur_state, right_cur_state) from fresh cabinet feedback."""
-        states = self.get_arm_controller_states()
-        return (states[0]['cur_state'], states[1]['cur_state'])
-
-    def get_arm_controller_states(self):
-        """Read both controller states/errors from a fresh cabinet snapshot."""
-        sub_data = self.robot.subscribe(DCSS())
-        self._feedback_guard.observe(sub_data)
-        states = sub_data.get('states')
-        if (not isinstance(states, (list, tuple)) or len(states) != 2
-                or any(not isinstance(state, dict) or
-                       not isinstance(state.get('cur_state'), int) or
-                       not isinstance(state.get('err_code'), int) for state in states)):
-            raise ValueError('missing or invalid cabinet controller state/error')
-        return states
+        """Return (left_cur_state, right_cur_state) from cabinet feedback."""
+        dcss = DCSS()
+        sub_data = self.robot.subscribe(dcss)
+        return (sub_data["states"][0]["cur_state"], sub_data["states"][1]["cur_state"])
 
     def get_arm_status(self):
         """Dual-arm state codes, servo error codes, and trajectory-realtime metrics.
@@ -281,40 +245,28 @@ class TianjiChestDriver:
 
     # ==================== Impedance mode ====================
 
-    def set_impedance_mode(self, mode='joint', K=None, D=None, should_abort=None,
-                           *, velRatio=60, AccRatio=60):
+    def set_impedance_mode(self, mode='joint', K=None, D=None):
         """
         Set dual-arm impedance mode.
 
-        Stage K/D and velocity first, then the measured hold pose and
-        state=3 with its impedance subtype.
+        Set impedance parameters and subtype, then request state3.
 
         Args:
             mode: 'joint' or 'cart'.
             K: stiffness list (7 elements).
-            D: damping-ratio list (7 elements).
-            velRatio: integer joint-following velocity percentage, 1..100.
-            AccRatio: integer joint-following acceleration percentage, 1..100.
+            D: damping list (7 elements).
         """
-        if mode not in ('cart', 'joint'):
-            raise ValueError('impedance mode must be cart or joint')
-        for name, value in (('velRatio', velRatio), ('AccRatio', AccRatio)):
-            if type(value) is not int or not 1 <= value <= 100:
-                raise ValueError(f'{name} must be an integer percentage in 1..100')
-        check_motion_allowed(should_abort)
-        _impedance_entry_pose(self.robot, self._feedback_guard)
-        check_motion_allowed(should_abort)
         if mode == 'cart':
             K = K or [8000, 8000, 8000, 100, 100, 100, 20]
             D = D or [0.3, 0.3, 0.3, 0.4, 0.4, 0.4, 0.4]
 
-            _checked_mode_command(self.robot, 'clear_set')
-            _checked_mode_command(self.robot, 'set_cart_kd_params', arm='A', K=K, D=D, type=2)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=velRatio, AccRatio=AccRatio)
-            _checked_mode_command(self.robot, 'set_cart_kd_params', arm='B', K=K, D=D, type=2)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=velRatio, AccRatio=AccRatio)
-            _checked_mode_command(self.robot, 'send_cmd')
-            guarded_wait(0.5, should_abort)
+            self.robot.clear_set()
+            self.robot.set_cart_kd_params(arm='A', K=K, D=D, type=2)
+            self.robot.set_cart_kd_params(arm='B', K=K, D=D, type=2)
+            self.robot.set_impedance_type(arm='A', type=2)
+            self.robot.set_impedance_type(arm='B', type=2)
+            self.robot.send_cmd()
+            time.sleep(0.5)
 
             self.logger.info(f"Dual-arm Cartesian impedance mode K={K}")
 
@@ -322,58 +274,46 @@ class TianjiChestDriver:
             K = K or [2, 2, 2, 1.6, 1, 1, 1]
             D = D or [0.3, 0.3, 0.3, 0.2, 0.2, 0.2, 0.2]
 
-            _checked_mode_command(self.robot, 'clear_set')
-            _checked_mode_command(self.robot, 'set_joint_kd_params', arm='A', K=K, D=D)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=velRatio, AccRatio=AccRatio)
-            _checked_mode_command(self.robot, 'set_joint_kd_params', arm='B', K=K, D=D)
-            _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=velRatio, AccRatio=AccRatio)
-            _checked_mode_command(self.robot, 'send_cmd')
-            guarded_wait(0.5, should_abort)
+            self.robot.clear_set()
+            self.robot.set_joint_kd_params(arm='A', K=K, D=D)
+            self.robot.set_joint_kd_params(arm='B', K=K, D=D)
+            self.robot.set_impedance_type(arm='A', type=1)
+            self.robot.set_impedance_type(arm='B', type=1)
+            self.robot.send_cmd()
+            time.sleep(0.5)
 
             self.logger.info(f"Dual-arm joint impedance mode K={K}")
 
         # Servo-on after params are loaded.
-        check_motion_allowed(should_abort)
-        hold_left, hold_right = _impedance_entry_pose(self.robot, self._feedback_guard)
-        check_motion_allowed(should_abort)
-        _checked_mode_command(self.robot, 'clear_set')
-        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=hold_left)
-        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=hold_right)
-        _checked_mode_command(self.robot, 'set_state', arm='A', state=3)
-        _checked_mode_command(self.robot, 'set_impedance_type', arm='A', type=1 if mode == 'joint' else 2)
-        _checked_mode_command(self.robot, 'set_state', arm='B', state=3)
-        _checked_mode_command(self.robot, 'set_impedance_type', arm='B', type=1 if mode == 'joint' else 2)
-        _checked_mode_command(self.robot, 'send_cmd')
+        self.robot.clear_set()
+        self.robot.set_state(arm='A', state=3)
+        self.robot.set_state(arm='B', state=3)
+        self.robot.set_vel_acc(arm='A', velRatio=60, AccRatio=60)
+        self.robot.set_vel_acc(arm='B', velRatio=60, AccRatio=60)
+        self.robot.send_cmd()
 
-        ok, diag = self._poll_arm_state_after_switch(
-            target_state=3, timeout=5.0, should_abort=should_abort)
+        # Poll for the requested state and report the result.
+        ok, diag = self._poll_arm_state_after_switch(target_state=3, timeout=5.0)
         if not ok:
-            raise RuntimeError(f'set_impedance_mode did not confirm both arms ready: {diag}')
+            self.logger.warning("set_impedance_mode: %s — proceeding (main-parity)", diag)
         else:
             self.logger.info("Dual-arm impedance mode active (cur_state=3)")
 
-    def _poll_arm_state_after_switch(self, target_state, timeout=5.0, poll_interval=0.05,
-                                      should_abort=None):
-        """Poll fresh feedback for both target states and zero controller errors."""
+    def _poll_arm_state_after_switch(self, target_state, timeout=5.0, poll_interval=0.05):
+        """Poll for bilateral target state; return (confirmed, diagnostic)."""
         dcss = DCSS()
         deadline = time.monotonic() + timeout
         a_state, b_state, a_err, b_err = -1, -1, -1, -1
         while time.monotonic() < deadline:
-            check_motion_allowed(should_abort)
             sub_data = self.robot.subscribe(dcss)
-            self._feedback_guard.observe(sub_data)
             a_state = sub_data["states"][0]["cur_state"]
             b_state = sub_data["states"][1]["cur_state"]
             a_err = sub_data["states"][0]["err_code"]
             b_err = sub_data["states"][1]["err_code"]
-            check_motion_allowed(should_abort)
-            if a_err != 0 or b_err != 0:
-                return False, (f'controller fault during mode switch target={target_state}; '
-                               f'left(state={a_state}, err_code={a_err}); '
-                               f'right(state={b_state}, err_code={b_err})')
             if a_state == target_state and b_state == target_state:
                 return True, ""
-            guarded_wait(poll_interval, should_abort)
+            # Continue polling until the target state or deadline.
+            time.sleep(poll_interval)
         diag = (
             f"state-switch timed out after {timeout}s target={target_state} "
             f"left(state={a_state}, err_code={a_err}); "
@@ -400,8 +340,18 @@ class TianjiChestDriver:
         Returns:
             tuple: (left_success, right_success, left_joints, right_joints).
         """
-        left_mm = pose_mm(left_pose, unit) if left_pose is not None else None
-        right_mm = pose_mm(right_pose, unit) if right_pose is not None else None
+        left_mm = None
+        right_mm = None
+        if left_pose is not None:
+            left_mm = list(left_pose)
+            if unit == 'm':
+                for i in range(3):
+                    left_mm[i] *= 1000
+        if right_pose is not None:
+            right_mm = list(right_pose)
+            if unit == 'm':
+                for i in range(3):
+                    right_mm[i] *= 1000
 
         ref_left, ref_right = self.get_current_joints()
 
@@ -424,7 +374,7 @@ class TianjiChestDriver:
                 )
                 if left_ik is not False:
                     if not left_ik.m_Output_IsOutRange and not left_ik.m_Output_IsJntExd:
-                        left_joints = self._joint_limits.validate('left', left_ik.m_Output_RetJoint.to_list())
+                        left_joints = left_ik.m_Output_RetJoint.to_list()
                         left_success = True
             except Exception as e:
                 self.logger.debug(f"left IK exception: {e}")
@@ -443,7 +393,7 @@ class TianjiChestDriver:
                 )
                 if right_ik is not False:
                     if not right_ik.m_Output_IsOutRange and not right_ik.m_Output_IsJntExd:
-                        right_joints = self._joint_limits.validate('right', right_ik.m_Output_RetJoint.to_list())
+                        right_joints = right_ik.m_Output_RetJoint.to_list()
                         right_success = True
             except Exception as e:
                 self.logger.debug(f"right IK exception: {e}")
@@ -461,10 +411,12 @@ class TianjiChestDriver:
             self.logger.debug("[RIGHT_IK] FAILED!")
 
         if send:
-            if ((left_pose is not None and not left_success)
-                    or (right_pose is not None and not right_success)):
-                raise RuntimeError('IK failed for a requested arm; neither arm was commanded')
-            self.move_to_joints_direct(left_joints, right_joints)
+            self.robot.clear_set()
+            if left_joints is not None:
+                self.robot.set_joint_cmd_pose(arm='A', joints=left_joints)
+            if right_joints is not None:
+                self.robot.set_joint_cmd_pose(arm='B', joints=right_joints)
+            self.robot.send_cmd()
 
         return left_success, right_success, left_joints, right_joints
 
@@ -484,26 +436,21 @@ class TianjiChestDriver:
         """
         left_success = left_joints is not None
         right_success = right_joints is not None
-        if left_joints is not None:
-            left_joints = self._joint_limits.validate('left', left_joints)
-        if right_joints is not None:
-            right_joints = self._joint_limits.validate('right', right_joints)
 
-        _checked_mode_command(self.robot, 'clear_set')
+        self.robot.clear_set()
         if left_joints is not None:
-            _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=list(left_joints))
+            self.robot.set_joint_cmd_pose(arm='A', joints=list(left_joints))
             left_joints_str = ', '.join([f'{j:7.2f}' for j in left_joints])
             self.logger.debug(f"[LEFT]  joints: [{left_joints_str}]")
         if right_joints is not None:
-            _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=list(right_joints))
+            self.robot.set_joint_cmd_pose(arm='B', joints=list(right_joints))
             right_joints_str = ', '.join([f'{j:7.2f}' for j in right_joints])
             self.logger.debug(f"[RIGHT] joints: [{right_joints_str}]")
-        _checked_mode_command(self.robot, 'send_cmd')
+        self.robot.send_cmd()
 
         return left_success, right_success
 
-    def move_to_joints_smooth(self, left_target=None, right_target=None, duration=3.0, dt=0.01,
-                              should_abort=None):
+    def move_to_joints_smooth(self, left_target=None, right_target=None, duration=3.0, dt=0.01):
         """
         Smoothly move both arms to the target joint angles using a quintic blend.
 
@@ -516,30 +463,20 @@ class TianjiChestDriver:
         Returns:
             bool: success.
         """
-        if not math.isfinite(duration) or not math.isfinite(dt) or duration <= 0 or dt <= 0:
-            raise ValueError("motion duration and dt must be finite and positive")
-        check_motion_allowed(should_abort)
         left_joints, right_joints = self.get_current_joints()
-        start_left = joint_vector(left_joints, 'left motion start')
-        start_right = joint_vector(right_joints, 'right motion start')
+        start_left = list(left_joints)
+        start_right = list(right_joints)
 
         if left_target is None:
             left_target = start_left
         if right_target is None:
             right_target = start_right
-        start_left, left_target = self._joint_limits.validate_quintic(
-            'left', start_left, left_target, duration)
-        start_right, right_target = self._joint_limits.validate_quintic(
-            'right', start_right, right_target, duration)
 
-        num_points = max(1, int(duration / dt))
+        num_points = int(duration / dt)
 
         self.logger.debug(f"Smooth move to target ({duration}s quintic blend)...")
 
         for i in range(num_points + 1):
-            check_motion_allowed(should_abort)
-            # Keep both frame freshness checks live throughout initialization.
-            self.get_current_joints()
             t = i / num_points
             s = 10 * (t ** 3) - 15 * (t ** 4) + 6 * (t ** 5)
 
@@ -563,64 +500,13 @@ class TianjiChestDriver:
 
     # ==================== Home pose / release ====================
 
-    def _wait_for_init_settle(self, left_target, right_target, timeout, should_abort=None):
-        """Require 0.25 s of advancing bilateral feedback within the init limits.
-
-        Joint residuals must be <5 degrees, finite-difference speeds <=2 deg/s,
-        and joint spread <=0.25 degree throughout the settling window.
-        """
-        if not math.isfinite(timeout) or timeout < 0:
-            raise ValueError('settle timeout must be finite and nonnegative')
-        targets = list(left_target) + list(right_target)
-        deadline = time.monotonic() + timeout
-        previous_serials = None
-        previous_joints = None
-        previous_at = None
-        stable_since = None
-        low = high = None
-        while True:
-            check_motion_allowed(should_abort)
-            left, right = self.get_current_joints()
-            serials = tuple(self._feedback_guard.serials)
-            now = time.monotonic()
-            # Count a settling sample only when both frame counters advance.
-            new_frame = (previous_serials is None or
-                         all(current != previous for current, previous
-                             in zip(serials, previous_serials)))
-            if new_frame:
-                joints = left + right
-                close = all(abs(value - target) < 5.0 for value, target in zip(joints, targets))
-                if previous_joints is None:
-                    slow = True
-                else:
-                    elapsed = now - previous_at
-                    slow = 0 < elapsed <= self._feedback_guard.timeout and all(
-                        abs(value - previous) / elapsed <= 2.0
-                        for value, previous in zip(joints, previous_joints))
-                if not close or not slow:
-                    stable_since = None
-                elif stable_since is None:
-                    stable_since, low, high = now, joints.copy(), joints.copy()
-                else:
-                    low = [min(a, b) for a, b in zip(low, joints)]
-                    high = [max(a, b) for a, b in zip(high, joints)]
-                    if any(top - bottom > 0.25 for top, bottom in zip(high, low)):
-                        stable_since, low, high = now, joints.copy(), joints.copy()
-                    elif now - stable_since >= 0.25 and now <= deadline:
-                        check_motion_allowed(should_abort)
-                        return True, left, right
-                previous_serials, previous_joints, previous_at = serials, joints, now
-            if now >= deadline:
-                return False, left, right
-            guarded_wait(min(0.01, deadline - now), should_abort)
-
-    def move_to_init(self, wait=True, timeout=1, duration=3.0, dt=0.01, should_abort=None):
+    def move_to_init(self, wait=True, timeout=1, duration=3.0, dt=0.01):
         """
         Smoothly move both arms to the configured init pose.
 
         Args:
-            wait: if True, require measured settling after the move.
-            timeout: maximum extra settle time (s); return early on stable feedback.
+            wait: if True, sleep `timeout` seconds after the move.
+            timeout: extra settle time (s).
             duration: trajectory duration (s).
             dt: interpolation step (s).
 
@@ -636,25 +522,19 @@ class TianjiChestDriver:
             left_target=INIT_JOINTS_LEFT,
             right_target=INIT_JOINTS_RIGHT,
             duration=duration,
-            dt=dt,
-            should_abort=should_abort,
+            dt=dt
         )
 
-        settled = True
         if wait:
-            settled, final_left, final_right = self._wait_for_init_settle(
-                INIT_JOINTS_LEFT, INIT_JOINTS_RIGHT, timeout, should_abort)
-        else:
-            check_motion_allowed(should_abort)
-            final_left, final_right = self.get_current_joints()
+            time.sleep(timeout)
+
+        final_left, final_right = self.get_current_joints()
         left_errors = [abs(final_left[i] - INIT_JOINTS_LEFT[i]) for i in range(7)]
         right_errors = [abs(final_right[i] - INIT_JOINTS_RIGHT[i]) for i in range(7)]
         max_left_error = max(left_errors)
         max_right_error = max(right_errors)
 
-        success = settled
-        if not settled:
-            self.logger.warning('Init pose did not remain settled before the timeout')
+        success = True
         if max_left_error < 5.0:
             self.logger.debug("[arm A] reached init pose")
         else:
@@ -672,36 +552,39 @@ class TianjiChestDriver:
     def set_standby(self):
         """Servo-off (state=0), keep connection, ready to resume. State-driven (waits cur_state=0)."""
         self.logger.info("Dual-arm STANDBY (state=0, connection preserved)")
-        confirm_standby(self.robot, self._feedback_guard, timeout=2.0)
-        self.logger.info("Dual-arm STANDBY reached (cur_state=0)")
+        self.robot.clear_set()
+        self.robot.set_state(arm='A', state=0)
+        self.robot.set_state(arm='B', state=0)
+        self.robot.send_cmd()
+
+        ok, diag = self._poll_arm_state_after_switch(target_state=0, timeout=2.0)
+        if not ok:
+            self.logger.warning("set_standby: %s — proceeding (main-parity)", diag)
+        else:
+            self.logger.info("Dual-arm STANDBY reached (cur_state=0)")
 
     def set_active(self, mode='joint', K=None, D=None):
-        """Enable impedance mode from fault-free controller feedback."""
-        states = self.get_arm_controller_states()
-        if any(state['err_code'] != 0 or state['cur_state'] not in (0, 1, 2, 3, 4)
-               for state in states):
-            raise RuntimeError(f'Cannot activate with a controller fault or transition: {states}')
+        """Clear errors and request impedance mode (state3)."""
         self.logger.info("Dual-arm ACTIVE (impedance mode)")
+        self.robot.clear_set()
+        self.robot.clear_error('A')
+        self.robot.clear_error('B')
+        self.robot.send_cmd()
+        time.sleep(0.5)
         self.set_impedance_mode(mode=mode, K=K, D=D)
 
-    def set_position_mode(self, velRatio=30, AccRatio=30, should_abort=None):
+    def set_position_mode(self, velRatio=30, AccRatio=30):
         """Switch to position-tracking mode (state=1), with state-machine poll (target=1, timeout=2s)."""
-        check_motion_allowed(should_abort)
-        hold_left, hold_right = self.get_current_joints()
-        check_motion_allowed(should_abort)
-        _checked_mode_command(self.robot, 'clear_set')
-        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='A', joints=hold_left)
-        _checked_mode_command(self.robot, 'set_joint_cmd_pose', arm='B', joints=hold_right)
-        _checked_mode_command(self.robot, 'set_state', arm='A', state=1)
-        _checked_mode_command(self.robot, 'set_state', arm='B', state=1)
-        _checked_mode_command(self.robot, 'set_vel_acc', arm='A', velRatio=velRatio, AccRatio=AccRatio)
-        _checked_mode_command(self.robot, 'set_vel_acc', arm='B', velRatio=velRatio, AccRatio=AccRatio)
-        _checked_mode_command(self.robot, 'send_cmd')
+        self.robot.clear_set()
+        self.robot.set_state(arm='A', state=1)
+        self.robot.set_state(arm='B', state=1)
+        self.robot.set_vel_acc(arm='A', velRatio=velRatio, AccRatio=AccRatio)
+        self.robot.set_vel_acc(arm='B', velRatio=velRatio, AccRatio=AccRatio)
+        self.robot.send_cmd()
 
-        ok, diag = self._poll_arm_state_after_switch(
-            target_state=1, timeout=2.0, should_abort=should_abort)
+        ok, diag = self._poll_arm_state_after_switch(target_state=1, timeout=2.0)
         if not ok:
-            raise RuntimeError(f'set_position_mode did not confirm both arms ready: {diag}')
+            self.logger.warning("set_position_mode: %s — proceeding (main-parity)", diag)
         else:
             self.logger.info("Dual-arm position mode active (cur_state=1)")
 
@@ -717,54 +600,48 @@ class TianjiChestDriver:
         self.robot.set_param('int', param, 1)
         self.logger.info(f"{'left' if arm == 'A' else 'right'} arm brake held")
 
-    def clear_arm_error(self, arm: str = 'A', timeout=3.0):
-        """Send one immediate OnClearErr request, then confirm fresh state0/error0."""
-        if arm not in ('A', 'B'):
-            raise ValueError('arm must be A or B')
-        if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError('clear timeout must be finite and positive')
+    def clear_arm_error(self, arm: str = 'A'):
+        """Clear error state on a single arm."""
         side = 'left' if arm == 'A' else 'right'
-        index = 0 if arm == 'A' else 1
-        deadline = time.monotonic() + timeout
-        guard = DualArmFeedbackGuard()
+        self.robot.clear_set()
         self.robot.clear_error(arm)
-        last_state = None
-        last_rejection = 'waiting for post-clear feedback'
-        previous_serials = None
-        stable_since = None
-        while time.monotonic() < deadline:
-            snapshot = self.robot.subscribe(DCSS())
-            try:
-                guard.observe(snapshot)
-                states = snapshot.get('states')
-                last_state = states[index] if isinstance(states, (list, tuple)) and len(states) == 2 else None
-                if (not isinstance(last_state, dict) or last_state.get('cur_state') != 0
-                        or last_state.get('err_code') != 0):
-                    stable_since = None
-                    last_rejection = 'target arm has not reached state=0, err_code=0'
-                else:
-                    serials = tuple(guard.serials)
-                    if (previous_serials is None or
-                            all(current != previous for current, previous
-                                in zip(serials, previous_serials))):
-                        now = time.monotonic()
-                        if stable_since is None:
-                            stable_since = now
-                        elif now - stable_since >= 0.1 and now <= deadline:
-                            self.logger.info(f'{side} arm error cleared; fresh standby confirmed')
-                            return
-                        previous_serials = serials
-                    last_rejection = 'waiting for stable post-clear standby feedback'
-            except ValueError as error:
-                stable_since = None
-                previous_serials = None
-                last_rejection = str(error)
-            time.sleep(0.01)
-        raise RuntimeError(f'{side} clear-error unconfirmed after {timeout}s; '
-                           f'controller state={last_state}; {last_rejection}')
+        self.robot.send_cmd()
+        time.sleep(0.5)
+        self.logger.info(f"{side} arm error cleared (clear_error {arm})")
 
     def disable_and_release(self, poll_timeout=3.0):
-        """Confirm both arms disabled, release the session, and report failures."""
-        self.logger.info("Disabling both arms and releasing cabinet connection")
-        disable_and_release(self.robot, self._feedback_guard, poll_timeout)
-        self.logger.info("Both arms disabled; connection released")
+        """Request state0, poll for confirmation, log errors, and release."""
+        self.logger.info("Disabling arms (set_state=0)...")
+        try:
+            self.robot.clear_set()
+            self.robot.set_state(arm='A', state=0)
+            self.robot.set_state(arm='B', state=0)
+            self.robot.send_cmd()
+        except Exception as exc:
+            self.logger.warning("set_state(0) on shutdown failed (ignored): %s", exc)
+
+        a, b = -1, -1
+        try:
+            dcss = DCSS()
+            deadline = time.monotonic() + max(0.5, float(poll_timeout))
+            while time.monotonic() < deadline:
+                sub = self.robot.subscribe(dcss)
+                a = sub["states"][0]["cur_state"]
+                b = sub["states"][1]["cur_state"]
+                if a == 0 and b == 0:
+                    self.logger.info("Both arms at cur_state=0")
+                    break
+                time.sleep(0.05)
+            else:
+                self.logger.warning(
+                    "Servos may still be on (cur_state left=%d, right=%d); "
+                    "releasing TCP anyway", a, b)
+        except Exception as exc:
+            self.logger.warning("cur_state poll failed (ignored): %s", exc)
+
+        self.logger.debug("Releasing connection...")
+        try:
+            self.robot.release_robot()
+        except Exception as exc:
+            self.logger.warning("release_robot failed (ignored): %s", exc)
+        self.logger.info("Safely exited")

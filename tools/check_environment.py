@@ -43,12 +43,10 @@ def main():
         try:
             from ament_index_python.packages import get_package_share_directory
             from wuji_sdk import RetargetSession, HandModel, Handedness
-            from wuji_hand2_driver.joint_mapping import JointLimits
             model = Path(get_package_share_directory("wuji_hand2_2_description"))
             for side, handedness in (("left", Handedness.Left), ("right", Handedness.Right)):
                 if not (model / "urdf" / f"{side}-ros.urdf").is_file():
                     raise ValueError(f"Missing {side} model")
-                JointLimits.from_urdf(model / "urdf" / f"{side}-ros.urdf", side)
                 RetargetSession.for_hand(HandModel.WujiHand2, side=handedness)
             print("OK Hand 2.2 models and official retarget sessions")
         except Exception as exc:

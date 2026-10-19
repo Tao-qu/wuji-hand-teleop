@@ -3,6 +3,7 @@ import inspect
 from textwrap import dedent
 import os
 import re
+import time
 from typing import Union
 from pathlib import Path
 
@@ -304,8 +305,6 @@ class Marvin_Robot:
         import sys
         print(f'user platform: {sys.platform}')
         override = library_path or os.environ.get('TIANJI_SDK_LIBRARY')
-        if override and not Path(override).expanduser().is_file():
-            raise FileNotFoundError(f'Tianji SDK library does not exist: {override}')
         if sys.platform=='win32':
             lib_path = str(Path(override).expanduser() if override else _lib_dir / 'libMarvinSDK.dll')
             self.robot = ctypes.WinDLL(lib_path)
@@ -341,8 +340,7 @@ class Marvin_Robot:
         self.robot.OnLinkTo.restype = ctypes.c_bool
         connected = self.robot.OnLinkTo(ip1, ip2, ip3, ip4)
         if connected:
-            # Request VERSION to register the feedback destination. The driver
-            # then verifies advancing feedback from both arms.
+            # Request VERSION to register the feedback destination.
             self.robot.OnGetIntPara.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_long)]
             self.robot.OnGetIntPara.restype = ctypes.c_long
             value = ctypes.c_long(0)

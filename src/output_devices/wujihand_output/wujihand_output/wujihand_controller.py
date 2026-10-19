@@ -16,17 +16,14 @@ class WujiHandController:
     NUM_JOINTS = 20
 
     def __init__(self, side: str, hand_name: str, *, logger=None, node=None):
-        if side not in ("left", "right"):
-            raise ValueError("side must be left or right")
         if node is None:
             raise ValueError("A ROS2 node is required")
         self.side = side
         self.hand_name = hand_name
         self.logger = logger or logging.getLogger(f"WujiHand2Controller_{side}")
-        # Fail startup if the official SDK cannot build the correct model.
         self.retargeter = Hand2Retargeter(side)
         self.hand: Optional[WujiHand] = WujiHand(hand_name, side, node, self.logger)
-        self.logger.info(f"{side} Wuji Hand 2 ready; official SDK retargeting, explicit motor enable required")
+        self.logger.info(f"{side} Wuji Hand 2 ready; official SDK retargeting")
 
     def set_joint_positions(self, positions: np.ndarray) -> bool:
         return self.hand is not None and self.hand.set_joint_positions(positions)
@@ -39,11 +36,7 @@ class WujiHandController:
             return self.retargeter.retarget(keypoints)
         except Exception as exc:
             self.logger.error(f"{self.side} Wuji Hand 2 retarget failed: {exc}")
-            self.retargeter.reset()
             return None
-
-    def reset_retargeting(self) -> None:
-        self.retargeter.reset()
 
     def set_keypoints(self, keypoints: np.ndarray) -> Tuple[bool, Optional[np.ndarray]]:
         angles = self.retarget(keypoints)

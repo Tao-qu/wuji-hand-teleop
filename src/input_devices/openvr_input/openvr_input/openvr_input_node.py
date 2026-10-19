@@ -50,18 +50,6 @@ class OpenVRInputConfig:
     publish_tf: bool = True
     parent_frame: str = "world"
 
-
-    def __post_init__(self):
-        required = {"chest", "left_wrist", "right_wrist", "left_arm", "right_arm"}
-        serials = self.tracker_serials or {}
-        if set(serials) != required:
-            raise ValueError("Configure exactly five Tracker roles: " + ", ".join(sorted(required)))
-        values = list(serials.values())
-        if any(not isinstance(value, str) or not value or "XXXX" in value for value in values):
-            raise ValueError("Replace Tracker serial placeholders with actual serial numbers")
-        if len(set(values)) != 5:
-            raise ValueError("Each Tracker role must use a distinct serial number")
-
     @classmethod
     def from_file(cls, path: str | Path) -> "OpenVRInputConfig":
         """Load configuration from a YAML file."""
