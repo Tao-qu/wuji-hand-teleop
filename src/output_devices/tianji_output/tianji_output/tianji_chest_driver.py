@@ -274,7 +274,7 @@ class TianjiChestDriver:
 
     # ==================== Impedance mode ====================
 
-    def set_impedance_mode(self, mode='joint', K=None, D=None):
+    def set_impedance_mode(self, mode='joint', K=None, D=None, should_abort=None):
         """
         Set dual-arm impedance mode.
 
@@ -287,6 +287,9 @@ class TianjiChestDriver:
             K: stiffness list (7 elements).
             D: damping list (7 elements).
         """
+        if mode not in ('cart', 'joint'):
+            raise ValueError('impedance mode must be cart or joint')
+        check_motion_allowed(should_abort)
         if mode == 'cart':
             K = K or [8000, 8000, 8000, 100, 100, 100, 20]
             D = D or [0.3, 0.3, 0.3, 0.4, 0.4, 0.4, 0.4]
@@ -297,7 +300,7 @@ class TianjiChestDriver:
             self.robot.set_impedance_type(arm='A', type=2)
             self.robot.set_impedance_type(arm='B', type=2)
             self.robot.send_cmd()
-            time.sleep(0.5)
+            guarded_wait(0.5, should_abort)
 
             self.logger.info(f"Dual-arm Cartesian impedance mode K={K}")
 
@@ -311,12 +314,14 @@ class TianjiChestDriver:
             self.robot.set_impedance_type(arm='A', type=1)
             self.robot.set_impedance_type(arm='B', type=1)
             self.robot.send_cmd()
-            time.sleep(0.5)
+            guarded_wait(0.5, should_abort)
 
             self.logger.info(f"Dual-arm joint impedance mode K={K}")
 
         # Servo-on after params are loaded.
+        check_motion_allowed(should_abort)
         hold_left, hold_right = self.get_current_joints()
+        check_motion_allowed(should_abort)
         self.robot.clear_set()
         self.robot.set_joint_cmd_pose(arm='A', joints=hold_left)
         self.robot.set_joint_cmd_pose(arm='B', joints=hold_right)
@@ -326,47 +331,40 @@ class TianjiChestDriver:
         self.robot.set_vel_acc(arm='B', velRatio=60, AccRatio=60)
         self.robot.send_cmd()
 
-        # Poll until both arms reach state=3. state=100 and 101/102/103 are all
-        # TRANSIENT switching codes — the arm passes through them and lands on 3
-        # on its own, so we just keep waiting (no clear_error, no fail).
-        ok, diag = self._poll_arm_state_after_switch(target_state=3, timeout=5.0)
+        ok, diag = self._poll_arm_state_after_switch(
+            target_state=3, timeout=5.0, should_abort=should_abort)
         if not ok:
             raise RuntimeError(f'set_impedance_mode did not confirm both arms ready: {diag}')
         else:
             self.logger.info("Dual-arm impedance mode active (cur_state=3)")
 
-    def _poll_arm_state_after_switch(self, target_state, timeout=5.0, poll_interval=0.05):
-        """Poll until both arms reach target_state, or timeout.
+    def _poll_arm_state_after_switch(self, target_state, timeout=5.0, poll_interval=0.05,
+                                      should_abort=None):
+        """Require both target states and zero controller errors, or reject.
 
-        SDK state machine: set_state(N) is not synchronous. The arm passes
-        through transient switching codes — 100, 101, 102, 103 — before it
-        lands on target_state. state=100 is NOT a fault here: it is just one of
-        those transient codes and the arm reaches the target on its own a moment
-        later, so we simply wait.
-
-        (The previous version treated 100 as ARM_STATE_ERROR and ran
-        clear_error on it. That dropped the arm back to standby (state=0) and
-        broke the in-progress switch, so the arm never reached impedance and
-        enable failed — a regression vs main, which never polled and just let
-        the transition finish.)
-
-        Returns: (ok: bool, diagnostic: str).
+        Mode switching is asynchronous. A non-target state with zero error
+        may be observed until timeout, but no numeric state is assumed safe
+        when its arm error is nonzero. This method never clears a fault.
         """
         dcss = DCSS()
         deadline = time.monotonic() + timeout
         a_state, b_state, a_err, b_err = -1, -1, -1, -1
         while time.monotonic() < deadline:
+            check_motion_allowed(should_abort)
             sub_data = self.robot.subscribe(dcss)
             self._feedback_guard.observe(sub_data)
             a_state = sub_data["states"][0]["cur_state"]
             b_state = sub_data["states"][1]["cur_state"]
             a_err = sub_data["states"][0]["err_code"]
             b_err = sub_data["states"][1]["err_code"]
+            check_motion_allowed(should_abort)
+            if a_err != 0 or b_err != 0:
+                return False, (f'controller fault during mode switch target={target_state}; '
+                               f'left(state={a_state}, err_code={a_err}); '
+                               f'right(state={b_state}, err_code={b_err})')
             if a_state == target_state and b_state == target_state:
                 return True, ""
-            # Any other code (100/101/102/103/0) is a transient switching state;
-            # keep waiting for the target rather than interfering with clear_error.
-            time.sleep(poll_interval)
+            guarded_wait(poll_interval, should_abort)
         diag = (
             f"state-switch timed out after {timeout}s target={target_state} "
             f"left(state={a_state}, err_code={a_err}); "
@@ -556,13 +554,67 @@ class TianjiChestDriver:
 
     # ==================== Home pose / release ====================
 
+    def _wait_for_init_settle(self, left_target, right_target, timeout, should_abort=None):
+        """Require 0.25 s of advancing, close and nearly stationary feedback.
+
+        Keep the existing strict <5 degree residual limit. A single close
+        frame is insufficient: both arm frame counters must keep advancing,
+        observed velocity must stay <=2 deg/s, and the window's joint spread
+        must stay <=0.25 degree before switching from position to impedance.
+        """
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError('settle timeout must be finite and nonnegative')
+        targets = list(left_target) + list(right_target)
+        deadline = time.monotonic() + timeout
+        previous_serials = None
+        previous_joints = None
+        previous_at = None
+        stable_since = None
+        low = high = None
+        while True:
+            check_motion_allowed(should_abort)
+            left, right = self.get_current_joints()
+            serials = tuple(self._feedback_guard.serials)
+            now = time.monotonic()
+            # get_current_joints enforces freshness. Additionally require a
+            # new frame from EACH arm for every sample contributing to dwell.
+            new_frame = (previous_serials is None or
+                         all(current != previous for current, previous
+                             in zip(serials, previous_serials)))
+            if new_frame:
+                joints = left + right
+                close = all(abs(value - target) < 5.0 for value, target in zip(joints, targets))
+                if previous_joints is None:
+                    slow = True
+                else:
+                    elapsed = now - previous_at
+                    slow = 0 < elapsed <= self._feedback_guard.timeout and all(
+                        abs(value - previous) / elapsed <= 2.0
+                        for value, previous in zip(joints, previous_joints))
+                if not close or not slow:
+                    stable_since = None
+                elif stable_since is None:
+                    stable_since, low, high = now, joints.copy(), joints.copy()
+                else:
+                    low = [min(a, b) for a, b in zip(low, joints)]
+                    high = [max(a, b) for a, b in zip(high, joints)]
+                    if any(top - bottom > 0.25 for top, bottom in zip(high, low)):
+                        stable_since, low, high = now, joints.copy(), joints.copy()
+                    elif now - stable_since >= 0.25 and now <= deadline:
+                        check_motion_allowed(should_abort)
+                        return True, left, right
+                previous_serials, previous_joints, previous_at = serials, joints, now
+            if now >= deadline:
+                return False, left, right
+            guarded_wait(min(0.01, deadline - now), should_abort)
+
     def move_to_init(self, wait=True, timeout=1, duration=3.0, dt=0.01, should_abort=None):
         """
         Smoothly move both arms to the configured init pose.
 
         Args:
-            wait: if True, sleep `timeout` seconds after the move.
-            timeout: extra settle time (s).
+            wait: if True, require measured settling after the move.
+            timeout: maximum extra settle time (s); return early on stable feedback.
             duration: trajectory duration (s).
             dt: interpolation step (s).
 
@@ -582,22 +634,21 @@ class TianjiChestDriver:
             should_abort=should_abort,
         )
 
+        settled = True
         if wait:
-            def abort_or_stale():
-                check_motion_allowed(should_abort)
-                self.get_current_joints()
-                return False
-            guarded_wait(timeout, abort_or_stale)
-
-        check_motion_allowed(should_abort)
-
-        final_left, final_right = self.get_current_joints()
+            settled, final_left, final_right = self._wait_for_init_settle(
+                INIT_JOINTS_LEFT, INIT_JOINTS_RIGHT, timeout, should_abort)
+        else:
+            check_motion_allowed(should_abort)
+            final_left, final_right = self.get_current_joints()
         left_errors = [abs(final_left[i] - INIT_JOINTS_LEFT[i]) for i in range(7)]
         right_errors = [abs(final_right[i] - INIT_JOINTS_RIGHT[i]) for i in range(7)]
         max_left_error = max(left_errors)
         max_right_error = max(right_errors)
 
-        success = True
+        success = settled
+        if not settled:
+            self.logger.warning('Init pose did not remain settled before the timeout')
         if max_left_error < 5.0:
             self.logger.debug("[arm A] reached init pose")
         else:
@@ -628,9 +679,11 @@ class TianjiChestDriver:
         time.sleep(0.5)
         self.set_impedance_mode(mode=mode, K=K, D=D)
 
-    def set_position_mode(self, velRatio=30, AccRatio=30):
+    def set_position_mode(self, velRatio=30, AccRatio=30, should_abort=None):
         """Switch to position-tracking mode (state=1), with state-machine poll (target=1, timeout=2s)."""
+        check_motion_allowed(should_abort)
         hold_left, hold_right = self.get_current_joints()
+        check_motion_allowed(should_abort)
         self.robot.clear_set()
         self.robot.set_joint_cmd_pose(arm='A', joints=hold_left)
         self.robot.set_joint_cmd_pose(arm='B', joints=hold_right)
@@ -640,7 +693,8 @@ class TianjiChestDriver:
         self.robot.set_vel_acc(arm='B', velRatio=velRatio, AccRatio=AccRatio)
         self.robot.send_cmd()
 
-        ok, diag = self._poll_arm_state_after_switch(target_state=1, timeout=2.0)
+        ok, diag = self._poll_arm_state_after_switch(
+            target_state=1, timeout=2.0, should_abort=should_abort)
         if not ok:
             raise RuntimeError(f'set_position_mode did not confirm both arms ready: {diag}')
         else:

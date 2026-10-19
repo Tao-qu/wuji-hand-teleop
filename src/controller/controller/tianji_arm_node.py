@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from functools import wraps
 import sys
 import threading
 import time
@@ -9,7 +10,8 @@ from typing import Optional
 
 import numpy as np
 import rclpy
-from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (
     QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy,
@@ -75,6 +77,10 @@ class TianjiArmControllerNode(Node):
         # ~10s move_to_init from leaving the node half-constructed (so
         # shutdown() never ran and the arm stayed live).
         self.declare_parameter('auto_enable', False)
+        self.declare_parameter('enable_timeout', 25.0)
+        self._enable_timeout = float(self.get_parameter('enable_timeout').value)
+        if not np.isfinite(self._enable_timeout) or self._enable_timeout <= 0:
+            raise ValueError('enable_timeout must be finite and positive')
         self.declare_parameter('tracker_timeout', 0.25)
         self._tracker_timeout = float(self.get_parameter('tracker_timeout').value)
         if not np.isfinite(self._tracker_timeout) or self._tracker_timeout <= 0:
@@ -127,7 +133,14 @@ class TianjiArmControllerNode(Node):
 
         # STANDBY / ACTIVE state management.
         self._arm_enabled = False
-        self._enable_lock = threading.Lock()
+        # Every SDK access uses this lock. Only the request flag may be set
+        # concurrently, so a Stop can interrupt initialization without a
+        # second thread writing a competing cabinet command.
+        self._enable_lock = threading.RLock()
+        self._request_lock = threading.Lock()
+        self._disable_requests = 0
+        self._stop_requested = threading.Event()
+        self._enable_deadline = None
         self._shutdown_requested = threading.Event()
 
         # Pose and joint caches.
@@ -211,13 +224,18 @@ class TianjiArmControllerNode(Node):
         self._publish_lifecycle(LIFECYCLE_INITIALIZING)
 
         # Services.
-        self.create_service(SetBool, '~/set_enabled', self._set_enabled_callback)
-        self.create_service(SetBool, '/tianji_arm/set_arm_state', self._set_arm_state_callback)
-        self.create_service(SetBool, '~/left/brake', self._left_brake_cb)
-        self.create_service(SetBool, '~/right/brake', self._right_brake_cb)
-        self.create_service(Trigger, '~/arm_status', self._arm_status_cb)
-        self.create_service(SetBool, '~/left/clear_error', self._left_clear_error_cb)
-        self.create_service(SetBool, '~/right/clear_error', self._right_clear_error_cb)
+        self._enable_callback_group = ReentrantCallbackGroup()
+        self.create_service(SetBool, '~/set_enabled', self._set_enabled_callback,
+                            callback_group=self._enable_callback_group)
+        self.create_service(SetBool, '/tianji_arm/set_arm_state',
+                            self._serialized_service(self._set_arm_state_callback))
+        self.create_service(SetBool, '~/left/brake', self._serialized_service(self._left_brake_cb))
+        self.create_service(SetBool, '~/right/brake', self._serialized_service(self._right_brake_cb))
+        self.create_service(Trigger, '~/arm_status', self._serialized_service(self._arm_status_cb))
+        self.create_service(SetBool, '~/left/clear_error',
+                            self._serialized_service(self._left_clear_error_cb))
+        self.create_service(SetBool, '~/right/clear_error',
+                            self._serialized_service(self._right_clear_error_cb))
 
         # Control loop + state-publish: two timers (rates read from ROS2 params; see top of __init__).
         self.create_timer(1.0 / self._control_rate_hz, self._control_loop)
@@ -269,6 +287,26 @@ class TianjiArmControllerNode(Node):
 
     # -------------------- Enable / disable --------------------
 
+    def _serialized_service(self, callback):
+        """Other services never queue an SDK operation behind initialization."""
+        @wraps(callback)
+        def serialized(request, response):
+            if not self._enable_lock.acquire(blocking=False):
+                response.success = False
+                response.message = 'Arm SDK busy; initialization or stopping is in progress'
+                return response
+            try:
+                with self._request_lock:
+                    stopping = self._disable_requests > 0 or self._shutdown_requested.is_set()
+                if stopping:
+                    response.success = False
+                    response.message = 'Arm stop is pending; request rejected'
+                    return response
+                return callback(request, response)
+            finally:
+                self._enable_lock.release()
+        return serialized
+
     def _do_enable(self):
         """Bring the arms from STANDBY to teleop-ready.
 
@@ -292,7 +330,6 @@ class TianjiArmControllerNode(Node):
                 return
             if not self._trackers_ready():
                 raise RuntimeError('All five Trackers must have fresh valid poses before enabling arms')
-            self._publish_lifecycle(LIFECYCLE_ENABLING)
             # Position mode with FULL velocity/acceleration ratio so the joints
             # actually reach init pose in the allotted window. Earlier defaults
             # (velRatio=30 / duration=3 / timeout=10) only moved ~40° per joint;
@@ -300,22 +337,31 @@ class TianjiArmControllerNode(Node):
             # residual check failed and the operator's Stop got gated forever.
             # quintic-blend duration 8s + 15s settle covers the worst case
             # (~170° single-joint traverse at this rate).
+            self._enable_deadline = time.monotonic() + self._enable_timeout
             try:
-                self.controller.set_position_mode(velRatio=100, AccRatio=100)
+                if self._initialization_should_abort():
+                    raise RuntimeError('Arm initialization cancelled before enabling')
+                self._publish_lifecycle(LIFECYCLE_ENABLING)
+                self.controller.set_position_mode(
+                    velRatio=100, AccRatio=100, should_abort=self._initialization_should_abort)
                 result = self.controller.move_to_init(
                     wait=True, timeout=15, duration=8.0,
                     should_abort=self._initialization_should_abort)
                 if result is False:
                     raise RuntimeError("move_to_init failed")
                 if self._initialization_should_abort():
-                    raise RuntimeError("tracker input lost during initialization")
-                self.controller.set_impedance_mode(mode='joint')
+                    raise RuntimeError('Arm initialization stopped, timed out, or lost Tracker input')
+                self.controller.set_impedance_mode(
+                    mode='joint', should_abort=self._initialization_should_abort)
                 if self._initialization_should_abort():
-                    raise RuntimeError("tracker input lost before teleoperation handoff")
+                    raise RuntimeError('Arm initialization stopped, timed out, or lost Tracker input')
                 self._arm_handoff_snapshot()
-                self._arm_state = ArmState.IMPEDANCE
-                self._arm_enabled = True
-                self._publish_lifecycle(LIFECYCLE_READY)
+                with self._request_lock:
+                    if self._initialization_should_abort():
+                        raise RuntimeError('Arm initialization cancelled before READY')
+                    self._arm_state = ArmState.IMPEDANCE
+                    self._arm_enabled = True
+                    self._publish_lifecycle(LIFECYCLE_READY)
             except BaseException:
                 self._arm_enabled = False
                 self._handoff_start_at = None
@@ -324,9 +370,12 @@ class TianjiArmControllerNode(Node):
                 except Exception as stop_error:
                     self.get_logger().error(f"Standby after initialization failure failed: {stop_error}")
                 raise
+            finally:
+                self._enable_deadline = None
 
     def _do_disable(self):
         """Standby (servo-off, keep connection). Idempotent under _enable_lock."""
+        self._stop_requested.set()
         with self._enable_lock:
             self._arm_enabled = False
             self._arm_state = ArmState.IMPEDANCE
@@ -362,14 +411,10 @@ class TianjiArmControllerNode(Node):
             except Exception:
                 pass
             self._auto_enable_timer = None
-        try:
-            self._do_enable()
-            self.get_logger().info("Arm auto-enabled; servos on")
-        except Exception as exc:
-            self.get_logger().error(
-                f"Auto-enable failed: {exc}. Node stays up; call ~/set_enabled to retry."
-            )
-            self._publish_lifecycle(LIFECYCLE_ENABLE_FAILED)
+        response = self._set_enabled_callback(
+            SetBool.Request(data=True), SetBool.Response(), _automatic=True)
+        if not response.success:
+            self.get_logger().error(f'Arm auto-enable failed: {response.message}')
 
     def _arm_handoff_snapshot(self):
         """Snapshot current hardware joints to seed the handoff ramp.
@@ -403,57 +448,77 @@ class TianjiArmControllerNode(Node):
             self._handoff_start_right = None
             raise RuntimeError(f"Cannot start teleoperation without measured handoff pose: {exc}") from exc
 
-    def _set_enabled_callback(self, request: SetBool.Request, response: SetBool.Response):
-        """ROS2 service: remote enable/disable. Fast-path based on SDK
-        cur_state; do NOT trust the _arm_enabled flag (it can drift from
-        hardware). _do_enable / _do_disable own the _enable_lock, so this
-        callback doesn't need to grab it itself."""
-        if request.data:
+    def _set_enabled_callback(self, request: SetBool.Request, response: SetBool.Response,
+                              _automatic=False):
+        """Stop is visible immediately; the SDK owner performs ordered rollback.
+
+        This service alone is reentrant. Repeated enables fail immediately;
+        disables set the event before waiting for the SDK lock. Pending stops
+        prevent a later enable from clearing that event ahead of its waiter.
+        Success still means the requested state completed, not just acceptance.
+        """
+        if not request.data:
+            with self._request_lock:
+                self._disable_requests += 1
+                self._stop_requested.set()
             try:
-                left_s, right_s = self.controller.get_arm_states_only()
-            except Exception as e:
-                self.get_logger().error(f"Failed to read hardware state (full enable path): {e}")
-                left_s, right_s = -1, -1
-            if self._arm_enabled and left_s == 3 and right_s == 3 and self._trackers_ready():
-                response.success = True
-                response.message = "Already enabled (hardware in state=3)"
-                return response
-            if self._arm_enabled:
                 try:
                     self._do_disable()
-                except Exception as exc:
-                    self._on_sdk_error('lost_enable_readiness', exc)
+                except Exception as error:
+                    response.success = False
+                    response.message = f'Arm stop unconfirmed: {error}'
+                    self.get_logger().error(response.message)
+                else:
+                    response.success = True
+                    response.message = 'Arms stopped (both standby states confirmed)'
+                return response
+            finally:
+                with self._request_lock:
+                    self._disable_requests -= 1
+
+        if not self._enable_lock.acquire(blocking=False):
+            response.success = False
+            response.message = 'Arm SDK busy; enable already running or stopping'
+            return response
+        try:
+            with self._request_lock:
+                if (self._disable_requests or self._shutdown_requested.is_set()
+                        or (_automatic and self._stop_requested.is_set())):
+                    response.success = False
+                    response.message = 'Arm stop is pending; enable rejected'
+                    return response
+                self._stop_requested.clear()
+            if self._arm_enabled:
+                try:
+                    left_s, right_s = self.controller.get_arm_states_only()
+                    ready = left_s == 3 and right_s == 3 and self._trackers_ready()
+                except Exception:
+                    ready = False
+                if ready:
+                    response.success = True
+                    response.message = 'Already enabled (hardware in state=3)'
+                    return response
+                try:
+                    self._do_disable()
+                    response.message = 'Existing arm session lost readiness; stopped both arms'
+                except Exception as error:
+                    response.message = f'Existing arm session lost readiness; stop unconfirmed: {error}'
                 response.success = False
-                response.message = 'Existing arm session lost hardware/tracker readiness; stopped both arms'
                 return response
             try:
-                self.get_logger().info("Enabling arms: set_active + move_to_init")
+                self.get_logger().info('Enabling arms with cancellable initialization')
                 self._do_enable()
-                self.get_logger().info("Arms enabled, move_to_init complete")
                 response.success = True
-                response.message = "Arms enabled, move_to_init complete"
+                response.message = 'Arms enabled, move_to_init complete'
             except Exception as e:
                 self.get_logger().error(f"Enable failed: {e}")
                 self._arm_enabled = False
-                try:
-                    self.controller.set_standby()
-                except Exception as stop_error:
-                    self.get_logger().error(f"Standby after enable failure failed: {stop_error}")
                 self._publish_lifecycle(LIFECYCLE_ENABLE_FAILED)
                 response.success = False
                 response.message = f"Arm enable failed: {e}"
-        else:
-            try:
-                self._do_disable()
-            except Exception as e:
-                self.get_logger().error(f"set_standby error: {e}")
-                response.success = False
-                response.message = f"set_standby failed: {e}"
-                return response
-            self.get_logger().info("Arms stopped")
-            response.success = True
-            response.message = "Arms stopped"
-        return response
+            return response
+        finally:
+            self._enable_lock.release()
 
     # -------------------- Brake (release / hold) --------------------
 
@@ -573,13 +638,23 @@ class TianjiArmControllerNode(Node):
 
     def _state_publish_loop(self):
         """500Hz: publish joint_states only."""
-        self._publish_state()
+        if self._shutdown_requested.is_set() or not self._enable_lock.acquire(blocking=False):
+            return
+        try:
+            self._publish_state()
+        finally:
+            self._enable_lock.release()
 
     def _control_loop(self):
         """120Hz: TF -> IK -> hardware. State publish is handled by a separate timer."""
-        if not self._arm_enabled:
+        if (self._stop_requested.is_set() or self._shutdown_requested.is_set()
+                or not self._enable_lock.acquire(blocking=False)):
             return
-        self._teleop_control()
+        try:
+            if self._arm_enabled and not self._stop_requested.is_set():
+                self._teleop_control()
+        finally:
+            self._enable_lock.release()
 
     def _teleop_control(self):
         """Look up TF -> local IK -> hardware."""
@@ -787,6 +862,9 @@ class TianjiArmControllerNode(Node):
 
     def _initialization_should_abort(self):
         return (self._shutdown_requested.is_set()
+                or self._stop_requested.is_set()
+                or (self._enable_deadline is not None
+                    and time.monotonic() >= self._enable_deadline)
                 or not rclpy.ok(context=self.context) or not self._trackers_ready())
 
     def _trackers_ready(self) -> bool:
@@ -826,9 +904,12 @@ class TianjiArmControllerNode(Node):
     def shutdown(self):
         self.get_logger().info("Shutting down...")
         self._shutdown_requested.set()
+        self._stop_requested.set()
         try:
             if hasattr(self, 'controller'):
-                self.controller.disable_and_release()
+                with self._enable_lock:
+                    self._arm_enabled = False
+                    self.controller.disable_and_release()
         finally:
             if hasattr(self, '_tf_executor'):
                 self._tf_executor.shutdown(timeout_sec=2.0)
@@ -859,9 +940,12 @@ def main(argv: Optional[list[str]] = None):
 
     rclpy.init(args=raw_argv)
     node = None
+    executor = None
     try:
         node = TianjiArmControllerNode(robot_ip=config.get("robot_ip", "192.168.1.190"))
-        rclpy.spin(node)
+        executor = MultiThreadedExecutor(num_threads=3, context=node.context)
+        executor.add_node(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException, RCLError):
         # KeyboardInterrupt: direct SIGINT to a non-rclpy code path.
         # ExternalShutdownException: rclpy's documented signal-shutdown signal.
@@ -870,6 +954,13 @@ def main(argv: Optional[list[str]] = None):
         # tripped on "context is not valid". All three mean "exit cleanly".
         pass
     finally:
+        if node is not None:
+            node._shutdown_requested.set()
+            node._stop_requested.set()
+        if executor is not None:
+            # Let an active initialization observe cancellation and finish its
+            # ordered rollback before releasing or destroying SDK/ROS objects.
+            executor.shutdown()
         if node is not None:
             try:
                 node.shutdown()

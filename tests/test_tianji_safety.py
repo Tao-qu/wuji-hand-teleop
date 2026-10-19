@@ -2,7 +2,8 @@
 from pathlib import Path
 import sys
 import threading
-from types import SimpleNamespace
+import time
+from types import MethodType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -129,8 +130,9 @@ def test_initialization_abort_stops_without_marking_ready():
     controller.move_to_init.side_effect = RuntimeError('tracker lost mid-motion')
     node = SimpleNamespace(
         _enable_lock=threading.Lock(), _arm_enabled=False, _trackers_ready=lambda: True,
+        _enable_timeout=25.0,
         _publish_lifecycle=Mock(), controller=controller,
-        _initialization_should_abort=lambda: True, get_logger=lambda: Mock(),
+        _initialization_should_abort=lambda: False, get_logger=lambda: Mock(),
         _arm_handoff_snapshot=Mock())
     with pytest.raises(RuntimeError, match='tracker lost'):
         TianjiArmControllerNode._do_enable(node)
@@ -228,3 +230,263 @@ def test_driver_shutdown_propagates_failure(driver_class):
     with pytest.raises(RuntimeError, match='disable:'):
         driver_class.disable_and_release(driver)
     driver.robot.release_robot.assert_called_once()
+
+
+def cancellable_node(controller):
+    """Bind production coordination methods without constructing a ROS node."""
+    node = SimpleNamespace(
+        controller=controller, _enable_lock=threading.RLock(),
+        _request_lock=threading.Lock(), _disable_requests=0,
+        _stop_requested=threading.Event(), _shutdown_requested=threading.Event(),
+        _enable_timeout=25.0, _enable_deadline=None, _arm_enabled=False,
+        context=object(), _trackers_ready=lambda: True,
+        _publish_lifecycle=Mock(), get_logger=lambda: Mock(),
+        _arm_handoff_snapshot=Mock(), _publish_state=Mock(), _teleop_control=Mock())
+    for name in ('_do_enable', '_do_disable', '_initialization_should_abort',
+                 '_set_enabled_callback', '_serialized_service',
+                 '_state_publish_loop', '_control_loop'):
+        setattr(node, name, MethodType(getattr(TianjiArmControllerNode, name), node))
+    return node
+
+
+@pytest.mark.parametrize('blocked_phase', ['position', 'motion', 'impedance'])
+def test_disable_interrupts_initialization_without_concurrent_sdk_writes(blocked_phase):
+    entered, abort_seen, release_owner = (threading.Event() for _ in range(3))
+    sdk_calls = []
+    controller = Mock()
+
+    def phase(name):
+        def execute(*args, should_abort, **kwargs):
+            sdk_calls.append((name, threading.current_thread().name))
+            if name == blocked_phase:
+                entered.set()
+                deadline = time.monotonic() + 2
+                while not should_abort():
+                    assert time.monotonic() < deadline, 'disable never reached the SDK owner'
+                    time.sleep(.001)
+                abort_seen.set()
+                assert release_owner.wait(2), 'test did not release the SDK owner'
+                raise RuntimeError('motion cancelled by Stop')
+            return True
+        return execute
+
+    controller.set_position_mode.side_effect = phase('position')
+    controller.move_to_init.side_effect = phase('motion')
+    controller.set_impedance_mode.side_effect = phase('impedance')
+    controller.set_standby.side_effect = lambda: sdk_calls.append(
+        ('standby', threading.current_thread().name))
+    node = cancellable_node(controller)
+    results = {}
+    def call(key, enabled):
+        results[key] = node._set_enabled_callback(
+            SimpleNamespace(data=enabled), SimpleNamespace(success=None, message=''))
+
+    enable = threading.Thread(target=call, args=('enable', True), name='sdk-initializer')
+    stop = threading.Thread(target=call, args=('stop', False), name='stop-request')
+    with patch('controller.tianji_arm_node.rclpy.ok', return_value=True):
+        enable.start()
+        try:
+            assert entered.wait(2)
+            # A duplicate enable and unrelated SDK callbacks must not wait,
+            # touch the hardware, or exhaust all executor threads.
+            call('duplicate', True)
+            assert not results['duplicate'].success
+            other_operation = Mock()
+            response = node._serialized_service(other_operation)(None, SimpleNamespace())
+            assert not response.success
+            other_operation.assert_not_called()
+            node._state_publish_loop()
+            node._control_loop()
+            node._publish_state.assert_not_called()
+            node._teleop_control.assert_not_called()
+            stop.start()
+            assert abort_seen.wait(2)
+            assert node._disable_requests == 1
+            assert 'stop' not in results  # waits for the original SDK owner
+            assert not any(name == 'standby' for name, _ in sdk_calls)
+            call('racing_enable', True)
+            assert not results['racing_enable'].success
+        finally:
+            release_owner.set()
+            enable.join(3)
+            if stop.ident is not None:
+                stop.join(3)
+    assert not enable.is_alive() and not stop.is_alive()
+    assert not results['enable'].success
+    assert results['stop'].success
+    assert sdk_calls[-2:] == [('standby', 'sdk-initializer'), ('standby', 'stop-request')]
+    assert not node._arm_enabled and node._stop_requested.is_set()
+    assert node._disable_requests == 0 and node._enable_deadline is None
+    assert all(call.args != (LIFECYCLE_READY,) for call in node._publish_lifecycle.call_args_list)
+
+
+def test_pending_stop_cannot_be_erased_by_a_later_enable():
+    node = cancellable_node(Mock())
+    node._disable_requests = 1
+    node._stop_requested.set()
+    response = node._set_enabled_callback(SimpleNamespace(data=True), SimpleNamespace())
+    assert not response.success
+    assert node._stop_requested.is_set()
+    node.controller.set_position_mode.assert_not_called()
+
+
+def test_failed_disable_reports_unconfirmed_and_keeps_stop_latched():
+    node = cancellable_node(Mock())
+    node.controller.set_standby.side_effect = RuntimeError('right state100 error6')
+    response = node._set_enabled_callback(SimpleNamespace(data=False), SimpleNamespace())
+    assert not response.success and 'unconfirmed' in response.message
+    assert node._disable_requests == 0 and node._stop_requested.is_set()
+
+
+def test_enable_deadline_cancels_even_with_fresh_trackers():
+    node = cancellable_node(Mock())
+    node._enable_deadline = time.monotonic() - .01
+    with patch('controller.tianji_arm_node.rclpy.ok', return_value=True):
+        assert node._initialization_should_abort()
+    assert not node._stop_requested.is_set()
+
+
+def test_stop_at_handoff_prevents_ready_and_startup_timer_cannot_undo_stop():
+    node = cancellable_node(Mock())
+    node._arm_handoff_snapshot.side_effect = node._stop_requested.set
+    with patch('controller.tianji_arm_node.rclpy.ok', return_value=True):
+        response = node._set_enabled_callback(SimpleNamespace(data=True), SimpleNamespace())
+    assert not response.success and not node._arm_enabled
+    node.controller.set_standby.assert_called_once()
+    assert all(call.args != (LIFECYCLE_READY,) for call in node._publish_lifecycle.call_args_list)
+    response = node._set_enabled_callback(SimpleNamespace(data=False), SimpleNamespace())
+    assert response.success
+    response = node._set_enabled_callback(
+        SimpleNamespace(data=True), SimpleNamespace(), _automatic=True)
+    assert not response.success and node._stop_requested.is_set()
+
+
+def test_shutdown_waits_for_initialization_rollback_before_releasing_sdk():
+    entered, abort_seen, release_owner = (threading.Event() for _ in range(3))
+    calls = []
+    controller = Mock()
+    node = cancellable_node(controller)
+    def initialize(*args, should_abort, **kwargs):
+        entered.set()
+        deadline = time.monotonic() + 2
+        while not should_abort():
+            assert time.monotonic() < deadline
+            time.sleep(.001)
+        abort_seen.set()
+        assert release_owner.wait(2)
+        raise RuntimeError('shutdown cancellation')
+    controller.move_to_init.side_effect = initialize
+    controller.set_standby.side_effect = lambda: calls.append('standby')
+    controller.disable_and_release.side_effect = lambda: calls.append('release')
+    enable = threading.Thread(target=node._set_enabled_callback,
+        args=(SimpleNamespace(data=True), SimpleNamespace()))
+    stop = threading.Thread(target=TianjiArmControllerNode.shutdown, args=(node,))
+    with patch('controller.tianji_arm_node.rclpy.ok', return_value=True):
+        enable.start()
+        try:
+            assert entered.wait(2)
+            stop.start()
+            assert abort_seen.wait(2)
+            assert calls == []  # release cannot race the initializing SDK owner
+        finally:
+            release_owner.set()
+            enable.join(3)
+            if stop.ident is not None:
+                stop.join(3)
+    assert not enable.is_alive() and not stop.is_alive()
+    assert calls == ['standby', 'release']
+
+
+@pytest.mark.parametrize('reported_state', [100, 3])
+def test_controller_fault_rejects_mode_even_when_servo_codes_are_zero(reported_state):
+    driver = SimpleNamespace(robot=Mock(), _feedback_guard=Mock())
+    driver.robot.subscribe.return_value = {'states': [
+        {'cur_state': 3, 'err_code': 0}, {'cur_state': reported_state, 'err_code': 6}],
+        'servo_errs': [[0] * 7, [0] * 7]}
+    ok, reason = TianjiChestDriver._poll_arm_state_after_switch(driver, target_state=3)
+    assert not ok and 'err_code=6' in reason
+    assert driver.robot.subscribe.call_count == 1
+    driver.robot.clear_error.assert_not_called()
+
+
+def test_mode_poll_observes_stop_before_another_sdk_read():
+    driver = SimpleNamespace(robot=Mock(), _feedback_guard=Mock())
+    with pytest.raises(RuntimeError, match='cancelled'):
+        TianjiChestDriver._poll_arm_state_after_switch(
+            driver, target_state=3, should_abort=lambda: True)
+    driver.robot.subscribe.assert_not_called()
+
+
+@pytest.mark.parametrize('method', ['set_position_mode', 'set_impedance_mode'])
+def test_mode_timeout_cannot_report_success(method):
+    driver = SimpleNamespace(robot=Mock(), logger=Mock(),
+        get_current_joints=lambda: ([0] * 7, [0] * 7),
+        _poll_arm_state_after_switch=Mock(return_value=(False, 'timeout')))
+    with patch('tianji_output.tianji_chest_driver.guarded_wait'):
+        with pytest.raises(RuntimeError, match='did not confirm'):
+            getattr(TianjiChestDriver, method)(driver)
+
+
+def run_settle_feedback(feedback, timeout=15.0):
+    """Drive the real settling logic with an offline clock and frame source."""
+    now = [0.0]
+    driver = SimpleNamespace(_feedback_guard=SimpleNamespace(serials=[0, 0], timeout=.25))
+    def read():
+        left, right, serials = feedback(now[0])
+        driver._feedback_guard.serials = serials
+        return left, right
+    def wait(duration, should_abort):
+        now[0] += duration
+    driver.get_current_joints = read
+    with patch('tianji_output.tianji_chest_driver.time.monotonic', side_effect=lambda: now[0]), \
+         patch('tianji_output.tianji_chest_driver.guarded_wait', side_effect=wait):
+        result = TianjiChestDriver._wait_for_init_settle(driver, [0] * 7, [0] * 7, timeout)
+    return result, now[0]
+
+
+def test_settle_returns_early_only_after_both_arms_stay_stable():
+    def feedback(now):
+        return [0] * 7, [0] * 7, [round(now * 100) + 1] * 2
+    (settled, left, right), elapsed = run_settle_feedback(feedback)
+    assert settled and left == right == [0] * 7
+    assert .25 <= elapsed < .28  # does not sleep the entire 15-second budget
+
+
+def test_settle_does_not_accept_outside_original_five_degree_tolerance():
+    for error in (5.0, 6.0):
+        result, elapsed = run_settle_feedback(
+            lambda now: ([0] * 7, [error] * 7, [round(now * 100) + 1] * 2), timeout=.5)
+        assert not result[0]
+        assert elapsed == pytest.approx(.5)
+
+
+def test_one_close_frame_or_moving_joints_cannot_finish_settle():
+    def feedback(now):
+        # Both sides stay within 5 degrees but are still moving at 4 deg/s.
+        return [4 * now] * 7, [0] * 7, [round(now * 100) + 1] * 2
+    result, elapsed = run_settle_feedback(feedback, timeout=.5)
+    assert not result[0] and elapsed == pytest.approx(.5)
+
+
+def test_repeated_cached_feedback_never_counts_as_settled():
+    for frozen_side in (0, 1):
+        def feedback(now):
+            serials = [round(now * 100) + 1] * 2
+            serials[frozen_side] = 1
+            return [0] * 7, [0] * 7, serials
+        result, elapsed = run_settle_feedback(feedback, timeout=.5)
+        assert not result[0] and elapsed == pytest.approx(.5)
+
+
+def test_position_drift_resets_settle_window_even_at_low_velocity():
+    # 1.5 deg/s is below the velocity ceiling but moves >.25 degree per dwell.
+    result, elapsed = run_settle_feedback(
+        lambda now: ([1.5 * now] * 7, [0] * 7, [round(now * 100) + 1] * 2), timeout=.5)
+    assert not result[0] and elapsed == pytest.approx(.5)
+
+
+def test_unsettled_feedback_cannot_be_reported_as_success_by_move_to_init():
+    driver = SimpleNamespace(_init_joints_left=[0] * 7, _init_joints_right=[0] * 7,
+        logger=Mock(), move_to_joints_smooth=Mock(),
+        _wait_for_init_settle=Mock(return_value=(False, [0] * 7, [0] * 7)))
+    assert not TianjiChestDriver.move_to_init(driver, wait=True, timeout=15)

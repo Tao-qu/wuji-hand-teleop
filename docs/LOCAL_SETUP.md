@@ -138,3 +138,11 @@ python3 tools/sample_ros_inputs.py --duration 10 --mode hands --sides left --out
 ```
 
 The JSON contains MANUS frame counts, observed rates, sequence gaps/repeats/reordering, source and receipt ages, and the five expected dynamic Tracker TF frames. Static TF is reported separately without treating its latched timestamp as stale. `--max-age` defaults to 0.20 s; `--require-fresh` returns a nonzero exit code if a required stream is missing, frozen, or stale at the end. Sequence gaps may also result from latest-frame sampling, so they are not a direct transport-loss measurement. Output contains no poses, SDK log text, license fields, or calibration data. Save this JSON summary for acceptance records instead of copying raw SDK logs.
+
+## Arm initialization and Stop
+
+The retained home targets are left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Enabling first moves to this posture, then verifies impedance mode before accepting Tracker targets.
+
+`/tianji_arm_controller/set_enabled` returns after the requested transition completes. A concurrent `data: false` immediately registers cancellation; the existing SDK owner stops initialization and requests standby before the stop request confirms both arms are off. All SDK access remains serialized. Duplicate enables and other SDK services are rejected while initialization or stopping is busy.
+
+Initialization has a configurable `enable_timeout` of 25 seconds, checked during mode transitions, motion, and settling. Settling ends early only after advancing feedback from both arms remains within the existing 5-degree target tolerance, below 2 degrees/second, and within a 0.25-degree span for 0.25 seconds. Any nonzero controller error rejects a mode transition, even if individual servo error words are zero. Native SDK calls can block; the deadline and cancellation are cooperative software checks, not a replacement for the physical emergency stop.

@@ -34,7 +34,7 @@ ERR_DESCRIPTIONS = {
     3: "PVT fault",
     4: "request-enter-position failed",
     5: "enter-position failed",
-    6: "request-enter-torque failed (common after e-stop: joint at its limit)",
+    6: "request-enter-torque failed",
     7: "enter-torque failed",
     8: "request-enable-servo",
     9: "enable-servo failed",
