@@ -73,8 +73,10 @@ class HandSafety:
             return "joint diagnostics missing or stale"
         if len(snapshot.diagnostics.joints) != 20:
             return "diagnostics must include all 20 joints"
-        if any(j.error_code != 0 for j in snapshot.diagnostics.joints):
-            return "joint diagnostics report an active error"
+        errors = [f"{self.limits.names[i]} (nid={j.nid}, code=0x{j.error_code:04X})"
+                  for i, j in enumerate(snapshot.diagnostics.joints) if j.error_code != 0]
+        if errors:
+            return "joint diagnostics report an active error: " + "; ".join(errors)
         try:
             self.limits.validate_command(snapshot.state.positions)
         except ValueError:

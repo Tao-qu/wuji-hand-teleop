@@ -67,6 +67,20 @@ def test_default_no_command_does_not_enable_or_send_zero():
     assert backend.calls[-1] == ("send", (0.4,) * 20)
 
 
+def test_diagnostic_fault_identifies_joint_and_hexadecimal_code():
+    from dataclasses import replace
+    core, backend = make_core()
+    arm(core, backend)
+    backend.update(0.02, enabled=True)
+    joints = list(backend.data.diagnostics.joints)
+    joints[17] = replace(joints[17], error_code=7)
+    backend.data = replace(backend.data, diagnostics=DiagnosticSample(0.02, tuple(joints)))
+    core.tick(0.02)
+    assert core.lifecycle == "FAULT"
+    assert "l_pinky_mcp_abd (nid=22, code=0x0007)" in core.fault_reason
+    assert backend.calls[-1] == ("disable",)
+
+
 def test_enable_requires_complete_fresh_feedback_and_20_enabled():
     core, backend = make_core()
     backend.update(0.0, count=19)
