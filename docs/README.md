@@ -9,3 +9,5 @@
 - [Tracker wearing guide](tracker-wearing-guide.md)
 
 The target is Wuji Hand 2.2 with the official Wuji SDK. Launch defaults to disabled hand and arm motors; feedback-only hand mode is available separately. Tianji payload values are reused from the cabinet until the new mounted hand assemblies are calibrated. Build and offline-test results do not establish hardware acceptance.
+
+- [Hardware acceptance record — 2026-10-19](HARDWARE_ACCEPTANCE_2026-10-19.md): measured results, failed attempts, corrections, and remaining hardware checks.
