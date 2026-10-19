@@ -791,12 +791,3 @@ class Marvin_Kine:
                 return "ret=3,Configuration file has been modified"
             elif ret_int==4:
                 return 'ret=4, Insufficient collection time, lacking valid data'
-
-
-
-
-if __name__ == "__main__":
-    kk = Marvin_Kine()  # Instantiate
-    kk.help()  # View methods
-    kk.help('load_config')
-    exit()

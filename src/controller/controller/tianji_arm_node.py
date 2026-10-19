@@ -42,20 +42,14 @@ RIGHT_ARM_CMD_TOPIC = "/right_arm/joint_commands"
 LEFT_ARM_STATE_TOPIC = "/left_arm/joint_states"
 RIGHT_ARM_STATE_TOPIC = "/right_arm/joint_states"
 
-# Latched lifecycle state on /tianji_arm/lifecycle_state (Int8). Replaces the
-# old Bool /tianji_arm/teleop_ready — that signal was edge-only ("ready or
-# not"), so a Monitor waiting on it couldn't tell the difference between
-# "still initializing" and "_do_enable failed with move_to_init residual".
-# The Monitor's Stop button got stuck disabled in the second case. Lifecycle
-# is the state machine the operator actually needs to see:
-#
+# Latched lifecycle state on /tianji_arm/lifecycle_state (Int8).
 #   INITIALIZING  - node __init__ running; controller not yet armed
 #   ENABLING      - _do_enable in progress (set_position_mode + move_to_init
 #                   + set_impedance_mode); Marvin holds servos
 #   READY         - _do_enable completed; teleop loop running
 #   DISABLED      - _do_disable called (set_standby); waiting for re-enable
-#   ENABLE_FAILED - _do_enable raised; operator should Stop or call retry
-#   SDK_ERROR     - _on_sdk_error called; controller wedged
+#   ENABLE_FAILED - _do_enable raised
+#   SDK_ERROR     - SDK operation failed
 LIFECYCLE_INITIALIZING = 0
 LIFECYCLE_ENABLING = 1
 LIFECYCLE_READY = 2
@@ -70,12 +64,8 @@ class TianjiArmControllerNode(Node):
     def __init__(self, robot_ip: str = '192.168.1.190'):
         super().__init__("tianji_arm_controller")
 
-        # auto_enable=True: node powers up the arm asynchronously
-        # via a one-shot timer after __init__ returns. Setting it False keeps
-        # the arm in standby on startup; operators then call ~/set_enabled to
-        # bring it up. Decoupling enable from __init__ keeps SIGINT during the
-        # ~10s move_to_init from leaving the node half-constructed (so
-        # shutdown() never ran and the arm stayed live).
+        # Optional auto-enable runs through a one-shot timer after construction.
+        # Otherwise, ~/set_enabled starts the arms from standby.
         self.declare_parameter('auto_enable', False)
         self.declare_parameter('enable_timeout', 25.0)
         self._enable_timeout = float(self.get_parameter('enable_timeout').value)
@@ -85,26 +75,15 @@ class TianjiArmControllerNode(Node):
         self._tracker_timeout = float(self.get_parameter('tracker_timeout').value)
         if not np.isfinite(self._tracker_timeout) or self._tracker_timeout <= 0:
             raise ValueError('tracker_timeout must be finite and positive')
-        # Control loop / state-publish rates (Hz, two timers decoupled):
-        # - control_rate: TF -> IK control path. 120Hz matches the upper bound
-        #   of HTC tracker / MANUS input streams; higher adds no
-        #   new command information.
-        # - state_publish_rate: /{side}_arm/joint_states publish rate.
-        #   Downstream inference + data capture want finer state feedback;
-        #   500Hz is stable under Python + DDS.
-        # No rebuild required to change rates — launch / param yaml overrides work.
+        # Independent rates for TF -> IK control and joint-state publication.
         self.declare_parameter('control_rate', 120.0)
         self.declare_parameter('state_publish_rate', 500.0)
         self.declare_parameter('max_joint_velocity_deg_s', 30.0)
         self._max_joint_velocity = float(self.get_parameter('max_joint_velocity_deg_s').value)
         if not np.isfinite(self._max_joint_velocity) or not 0 < self._max_joint_velocity <= 30.0:
             raise ValueError('max_joint_velocity_deg_s must be finite and within (0,30]')
-        # Handoff after move_to_init: hold the init pose for `handoff_hold_sec`,
-        # then run a `handoff_ramp_sec` smoothstep ramp from the snapshot of
-        # current hardware joints to the live IK target. Avoids the snap from
-        # init pose to the operator's tracker pose on the first IK frame.
-        # Set either to 0.0 to disable that phase. Default 0.5s hold + 1.0s
-        # ramp is the value that field-tested cleanly on Wuji Hand + Tianji.
+        # Hold the measured pose, then blend to live IK over handoff_ramp_sec.
+        # A zero duration skips the corresponding handoff phase.
         self.declare_parameter('handoff_hold_sec', 0.5)
         self.declare_parameter('handoff_ramp_sec', 1.0)
         auto_enable = bool(self.get_parameter('auto_enable').value)
@@ -133,9 +112,7 @@ class TianjiArmControllerNode(Node):
 
         # STANDBY / ACTIVE state management.
         self._arm_enabled = False
-        # Every SDK access uses this lock. Only the request flag may be set
-        # concurrently, so a Stop can interrupt initialization without a
-        # second thread writing a competing cabinet command.
+        # Serialize SDK access; stop requests can set the event concurrently.
         self._enable_lock = threading.RLock()
         self._request_lock = threading.Lock()
         self._disable_requests = 0
@@ -160,9 +137,7 @@ class TianjiArmControllerNode(Node):
         self._last_command_right = None
         self._last_command_at = None
 
-        # Always enter standby first. set_standby failure (e.g. state=100
-        # under e-stop) must not block node startup, otherwise launch
-        # respawn=True crash-loops until the fault is cleared externally.
+        # Request standby at startup and publish whether it was confirmed.
         standby_ready = False
         try:
             self.controller.set_standby()
@@ -174,19 +149,14 @@ class TianjiArmControllerNode(Node):
                 f"awaiting operator intervention): {exc}"
             )
 
-        # If auto_enable, schedule async enable via a one-shot timer. Keeping
-        # the ~10s move_to_init out of __init__ means SIGINT during startup
-        # arrives at a fully-constructed node, so shutdown() runs and the arm
-        # is brought back to standby.
+        # Schedule optional enable after node construction.
         self._auto_enable_timer = None
         if auto_enable:
             self._auto_enable_timer = self.create_timer(0.1, self._auto_enable_once)
 
         # TF listener.
         self.tf_buffer = Buffer()
-        # Long initialization motions run synchronously on the control node.
-        # Keep TF reception alive on its own node/executor; this thread never
-        # accesses the robot SDK or sends a motion command.
+        # Receive TF on a separate executor while SDK operations run.
         self._tf_node = Node('tianji_tracker_listener', context=self.context)
         self.tf_listener = TransformListener(self.tf_buffer, self._tf_node)
         self._tf_executor = SingleThreadedExecutor(context=self.context)
@@ -208,11 +178,7 @@ class TianjiArmControllerNode(Node):
         self.left_ee_pose_pub = self.create_publisher(Float64MultiArray, '/left_arm/ee_pose', qos)
         self.right_ee_pose_pub = self.create_publisher(Float64MultiArray, '/right_arm/ee_pose', qos)
 
-        # Latched lifecycle state. TRANSIENT_LOCAL so late-joining
-        # subscribers (e.g. the Monitor UI opened after the controller is up)
-        # immediately receive the last value, rather than racing the next
-        # state transition. Monitor uses this to gate the Stop Teleop button
-        # on real controller state (see the LIFECYCLE_* constants at top).
+        # TRANSIENT_LOCAL delivers the latest lifecycle state to new subscribers.
         lifecycle_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -266,8 +232,7 @@ class TianjiArmControllerNode(Node):
     # -------------------- SDK exception handling --------------------
 
     def _on_sdk_error(self, context: str, error: Exception):
-        """On SDK exception, auto-disable the arm to avoid a deadlocked state.
-        Respawn recovers automatically."""
+        """Stop teleop, publish SDK_ERROR, and request standby."""
         self.get_logger().error(f"[{context}] SDK exception: {error}; auto-disabling arm")
         self._arm_enabled = False
         self._arm_state = ArmState.IMPEDANCE
@@ -277,9 +242,7 @@ class TianjiArmControllerNode(Node):
         try:
             self.controller.set_standby()
         except Exception as e2:
-            # Error-recovery path; do not re-raise (would clobber the outer
-            # timer callback). Must still log: SDK is already faulted and
-            # set_standby also failing means a real hardware fault.
+            # Log standby failure while preserving the original callback error.
             self.get_logger().error(
                 f"[{context}] set_standby also failed during recovery: {e2} — "
                 f"SDK may be wedged, awaiting respawn"
@@ -308,35 +271,17 @@ class TianjiArmControllerNode(Node):
         return serialized
 
     def _do_enable(self):
-        """Bring the arms from STANDBY to teleop-ready.
+        """Enter position mode, move to init, then enable joint-impedance teleop.
 
-        Sequence:
-            1. set_position_mode (rigid joint control) — required so
-               move_to_init can actually drive the joints to the target;
-               impedance K=2 is too soft for a 100°+ traverse in 3 s and
-               leaves residuals of 120° (real failure observed 2026-06-11
-               on tianji_arm_controller @ 192.168.1.190; Marvin replied
-               cur_state=3 but the joints sat where they were).
-            2. move_to_init quintic blend — accurate now that the joints
-               are rigid.
-            3. set_impedance_mode (the joint K/D from the README) — this
-               is the mode the teleop loop runs in.
-
-        Idempotent under _enable_lock: if already enabled, returns
-        immediately without re-publishing lifecycle.
+        Initialization runs under the SDK lock and checks cancellation,
+        deadline, and Tracker freshness between motion stages.
         """
         with self._enable_lock:
             if self._arm_enabled:
                 return
             if not self._trackers_ready():
                 raise RuntimeError('All five Trackers must have fresh valid poses before enabling arms')
-            # Position mode with FULL velocity/acceleration ratio so the joints
-            # actually reach init pose in the allotted window. Earlier defaults
-            # (velRatio=30 / duration=3 / timeout=10) only moved ~40° per joint;
-            # init pose differs by 120° on J1 / J4 — far past 40° — so the
-            # residual check failed and the operator's Stop got gated forever.
-            # quintic-blend duration 8s + 15s settle covers the worst case
-            # (~170° single-joint traverse at this rate).
+            # One deadline covers mode entry, the init trajectory, and settling.
             self._enable_deadline = time.monotonic() + self._enable_timeout
             try:
                 if self._initialization_should_abort():
@@ -397,13 +342,8 @@ class TianjiArmControllerNode(Node):
             self._publish_lifecycle(LIFECYCLE_DISABLED)
 
     def _auto_enable_once(self):
-        """One-shot timer callback: run _do_enable asynchronously. A failure
-        here leaves the node up (operator can retry via ~/set_enabled) but
-        publishes LIFECYCLE_ENABLE_FAILED so the Monitor can re-enable Stop
-        Teleop instead of waiting forever for a READY signal that never
-        comes."""
-        # Cancel + destroy the timer first so a slow _do_enable doesn't get
-        # re-entered by the next tick.
+        """Run the enable service once after node construction."""
+        # Cancel the one-shot timer before starting initialization.
         if self._auto_enable_timer is not None:
             try:
                 self._auto_enable_timer.cancel()
@@ -417,18 +357,10 @@ class TianjiArmControllerNode(Node):
             self.get_logger().error(f'Arm auto-enable failed: {response.message}')
 
     def _arm_handoff_snapshot(self):
-        """Snapshot current hardware joints to seed the handoff ramp.
-
-        After move_to_init the arm is at init pose; the operator's tracker is
-        in some arbitrary position. Without a ramp the first IK frame would
-        snap the arm directly to the operator's pose. Snapshot here, then
-        _teleop_control blends from the snapshot to live IK over
-        handoff_hold_sec + handoff_ramp_sec.
-        """
+        """Capture measured joints for the hold phase and subsequent IK blend."""
         try:
             left, right = self.controller.get_current_joints()
-            # Driver validates advancing cabinet frames, so a legitimate zero
-            # pose is distinguishable from a default/uninitialized zero cache.
+            # The driver validates bilateral feedback freshness.
             self._handoff_start_left = joint_vector(left, 'left handoff snapshot')
             self._handoff_start_right = joint_vector(right, 'right handoff snapshot')
             self._last_command_left = self._handoff_start_left.copy()
@@ -450,12 +382,10 @@ class TianjiArmControllerNode(Node):
 
     def _set_enabled_callback(self, request: SetBool.Request, response: SetBool.Response,
                               _automatic=False):
-        """Stop is visible immediately; the SDK owner performs ordered rollback.
+        """Serialize enable/disable and report completion of the requested state.
 
-        This service alone is reentrant. Repeated enables fail immediately;
-        disables set the event before waiting for the SDK lock. Pending stops
-        prevent a later enable from clearing that event ahead of its waiter.
-        Success still means the requested state completed, not just acceptance.
+        Disable sets the stop event before acquiring the SDK lock; pending
+        stops take priority over new enable requests.
         """
         if not request.data:
             with self._request_lock:
@@ -589,8 +519,7 @@ class TianjiArmControllerNode(Node):
             data=true  -> POSITION   (state=1)
             data=false -> IMPEDANCE  (state=3)
 
-        Fast-path based on SDK cur_state; do NOT trust _arm_state / _arm_enabled
-        flags (they can drift from hardware).
+        Read cabinet state before deciding whether a mode change is needed.
         """
         target_state = 1 if request.data else 3
         target_enum = ArmState.POSITION if request.data else ArmState.IMPEDANCE
@@ -713,8 +642,7 @@ class TianjiArmControllerNode(Node):
 
             blend_s = self._handoff_blend_factor()  # None = ramp finished, otherwise 0..1
             try:
-                # Always solve both sides before any write. One failed IK
-                # must not leave the other arm following the operator alone.
+                # Solve both arms before dispatching the joint-command batch.
                 left_ok, right_ok, l_target, r_target = self.controller.move_to_pose_direct(
                     left_pose=self.left_pose, right_pose=self.right_pose, unit='m', send=False)
                 if not (left_ok and right_ok):
@@ -820,7 +748,7 @@ class TianjiArmControllerNode(Node):
                 self.right_state_pub.publish(msg)
         except Exception as e:
             self._state_error_count += 1
-            # Only escalate to SDK fault while the arm is still enabled (avoid infinite loop after disable).
+            # Escalate repeated state-read failures while teleop is enabled.
             if self._arm_enabled and self._state_error_count >= 50:
                 self._on_sdk_error("publish_state", e)
                 self._state_error_count = 0
@@ -859,8 +787,7 @@ class TianjiArmControllerNode(Node):
                 self.right_ee_pose_pub.publish(msg)
 
         except Exception as e:
-            # During shutdown, a freed C++ object can still appear briefly.
-            # Log only; do not crash the node.
+            # Report debug-publication failures during shutdown.
             self.get_logger().warn(f"Failed to publish debug info during shutdown: {e}")
 
     # -------------------- TF utilities --------------------
@@ -958,11 +885,7 @@ def main(argv: Optional[list[str]] = None):
         executor.add_node(node)
         executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException, RCLError):
-        # KeyboardInterrupt: direct SIGINT to a non-rclpy code path.
-        # ExternalShutdownException: rclpy's documented signal-shutdown signal.
-        # RCLError: same signal, race window — rclpy's SIGINT handler
-        # invalidated the context mid-iteration and spin's next WaitSet
-        # tripped on "context is not valid". All three mean "exit cleanly".
+        # Complete shutdown when execution or the ROS context is interrupted.
         pass
     finally:
         if node is not None:

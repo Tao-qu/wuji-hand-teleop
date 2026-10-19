@@ -341,10 +341,8 @@ class Marvin_Robot:
         self.robot.OnLinkTo.restype = ctypes.c_bool
         connected = self.robot.OnLinkTo(ip1, ip2, ip3, ip4)
         if connected:
-            # Older SDKs only bind a local UDP socket in OnLinkTo. A read-only
-            # parameter request announces the feedback destination; clearing
-            # faults is neither a handshake nor a connection test. The driver
-            # must still verify advancing feedback for BOTH arms afterwards.
+            # Request VERSION to register the feedback destination. The driver
+            # then verifies advancing feedback from both arms.
             self.robot.OnGetIntPara.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_long)]
             self.robot.OnGetIntPara.restype = ctypes.c_long
             value = ctypes.c_long(0)
@@ -1272,16 +1270,6 @@ def _param_kind_to_str(kind):
         inspect.Parameter.VAR_KEYWORD: "Variable keyword argument (**kwargs)"
     }
     return mapping.get(kind, "Unknown parameter type")
-
-
-
-if __name__ == "__main__":
-    import time
-
-    tj_robot = Marvin_Robot()
-    tj_robot.help()
-    tj_robot.help('collect_data')
-
 
 
 # =============================================================================

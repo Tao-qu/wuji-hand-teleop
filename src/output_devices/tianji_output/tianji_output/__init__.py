@@ -6,13 +6,11 @@ File structure:
 ├── tianji_arm_controller.py       # Unified controller (integrates Cartesian and joint space)
 ├── tianji_chest_driver.py         # Chest-frame driver used by HTC/Tracker teleop
 ├── fault_codes.py                 # 115-entry CN/EN servo fault-code dictionaries
-├── _internal/                     # Internal implementation (not for direct import)
-│   ├── fx_robot.py                # Low-level robot communication
-│   ├── fx_kine.py                 # Kinematics solver interface
-│   ├── structure_data.py          # C interface data structures
-│   └── robot_structures.py        # Kinematics-related structures
-└── tools/                         # Standalone debugging tools
-    └── debug_arm_axis.py          # ROS2 node for debugging coordinate axes
+└── _internal/                     # Internal implementation (not for direct import)
+    ├── fx_robot.py                # Low-level robot communication
+    ├── fx_kine.py                 # Kinematics solver interface
+    ├── structure_data.py          # C interface data structures
+    └── robot_structures.py        # Kinematics-related structures
 
 Public interface:
 - TianjiArmController: Unified controller (supports both Cartesian and joint space)

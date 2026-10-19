@@ -314,10 +314,7 @@ class ScanSNDialog(QDialog):
         btn_row.addWidget(close_btn)
         self._layout.addLayout(btn_row)
 
-        # Loading widget — a layout child added to _results_host while the
-        # background thread blocks. Layout-embedded (not absolute-positioned)
-        # so its geometry is computed by Qt's normal layout pass rather than
-        # racing the dialog's first showEvent.
+        # Display a loading widget in the results layout while scanning.
         self._loading_widget: Optional[QWidget] = None
         self._loading_label: Optional[QLabel] = None
         self._loading_dots = 0
@@ -325,21 +322,13 @@ class ScanSNDialog(QDialog):
         self._loading_timer.timeout.connect(self._tick_loading)
 
         self._results_signal.connect(self._on_results)
-        # Loading page is the dialog's INITIAL content so the very first frame
-        # is "please wait" (not an empty/black viewport). The scan itself is
-        # kicked off from the first paintEvent (below) — only after the window
-        # has actually painted/composited is it safe to start the worker; an
-        # earlier kick (showEvent / QTimer in __init__) paints to a back buffer
-        # the compositor never displays on first open, hence the black screen.
+        # Start scanning after the first loading-page paint.
         self._scan_started = False
         self._install_loading_widget()
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        # The first real paint just happened → the "please wait" loading page
-        # (installed in __init__) is now on screen. Only now start the scan,
-        # deferred one short tick so this frame flushes to the compositor
-        # before the multi-second worker runs. Guarded so it fires exactly once.
+        # Queue the scan once, after the loading frame reaches the compositor.
         if self._scan_started:
             return
         self._scan_started = True

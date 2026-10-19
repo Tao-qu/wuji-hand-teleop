@@ -1,20 +1,8 @@
 #!/usr/bin/env python3
-"""
-Tianji Arm Chest-frame Driver.
+"""Tianji chest-frame driver for Cartesian IK and direct joint commands.
 
-Integrates Cartesian space control (via IK) and joint space control
-(direct joint angles). HTC Tracker teleop uses the Cartesian
-path; the joint path is kept for future use.
-
-All tunable parameters load from config/tianji_chest.yaml (single
-source of truth).
-
-Notes:
-- Requires controller firmware 100342 or newer (otherwise set_tool_kine
-  has no effect on IK).
-- IK tool offset is set on the kine side (set_tool_kine); the hardware
-  side `robot.set_tool` is given kineParams=[0,0,0,0,0,0] so we don't
-  double-apply the offset.
+Configuration supplies the initial pose and tool parameters. Tool geometry
+is applied in the kinematics SDK; tool dynamics are managed on the cabinet.
 """
 try:
     from tianji_output._internal.fx_robot import Marvin_Robot
@@ -38,12 +26,7 @@ from .feedback_guard import (ArmJointLimits, DualArmFeedbackGuard, check_motion_
 
 
 def _checked_mode_command(robot, method, **arguments):
-    """Reject an unaccepted native bool command before staging any later step.
-
-    OnClearSet/setters/OnSetSend can return false while the SDK send buffer
-    is busy. A true return only confirms SDK acceptance; the mode poll still
-    has to confirm cabinet state. Do not retry a partially staged mode batch.
-    """
+    """Check native command acceptance; mode completion uses cabinet feedback."""
     result = getattr(robot, method)(**arguments)
     if result is not True and not (type(result) is int and result == 1):
         arm = f" arm={arguments['arm']}" if 'arm' in arguments else ''
@@ -133,9 +116,7 @@ class TianjiChestDriver:
             pnva=config_result['PNVA'][0],
             j67=config_result['BD'][0]
         )
-        # Tool kinematics offset: identity (no offset).
-        # New SDK handles tool offset on the IK side; hardware-side
-        # robot.set_tool no longer receives kineParams.
+        # Apply the configured tool geometry in the kinematics SDK.
         self.kine_left.set_tool_kine(0, left_tool)
 
         self.logger.debug("[arm B] Initializing kinematics SDK...")
@@ -185,14 +166,7 @@ class TianjiChestDriver:
         self.logger.info("Dual-arm controller initialized")
 
     def _set_tool_params(self):
-        """
-        Set tool dynamic params (gravity compensation, hardware side).
-
-        kineParams is forced to [0,0,0,0,0,0]: the geometric tool offset
-        is fed to IK via kine.set_tool_kine(); setting it on the hardware
-        side too would double-compensate and misalign the wrist tracker
-        from the flange.
-        """
+        """Apply the configured cabinet tool-dynamics policy."""
         self._active_tool_dynamics = apply_tool_parameters(self.robot, self._tool_config, self.logger)
         time.sleep(0.3)
 
@@ -251,13 +225,7 @@ class TianjiChestDriver:
         }
 
     def get_arm_states_only(self):
-        """Lightweight state read: return (left_cur_state, right_cur_state).
-
-        Used by service callbacks for hardware-driven state checks
-        (e.g. to confirm the arm is actually in the target state rather
-        than trusting a Python flag). One SDK subscribe, no servo-error
-        read — about 5 ms. Much lighter than get_arm_status().
-        """
+        """Return (left_cur_state, right_cur_state) from fresh cabinet feedback."""
         states = self.get_arm_controller_states()
         return (states[0]['cur_state'], states[1]['cur_state'])
 
@@ -319,17 +287,14 @@ class TianjiChestDriver:
         Set dual-arm impedance mode.
 
         Stage K/D and velocity first, then the measured hold pose and
-        state=3 with its impedance subtype. This follows the vendor mode
-        examples; it is not an established fix for torque-entry error 6.
+        state=3 with its impedance subtype.
 
         Args:
             mode: 'joint' or 'cart'.
             K: stiffness list (7 elements).
-            D: damping list (7 elements).
+            D: damping-ratio list (7 elements).
             velRatio: integer joint-following velocity percentage, 1..100.
             AccRatio: integer joint-following acceleration percentage, 1..100.
-                Defaults preserve production behavior; vendor examples use
-                10/10 for commissioning. These are not measured-speed guards.
         """
         if mode not in ('cart', 'joint'):
             raise ValueError('impedance mode must be cart or joint')
@@ -389,12 +354,7 @@ class TianjiChestDriver:
 
     def _poll_arm_state_after_switch(self, target_state, timeout=5.0, poll_interval=0.05,
                                       should_abort=None):
-        """Require both target states and zero controller errors, or reject.
-
-        Mode switching is asynchronous. A non-target state with zero error
-        may be observed until timeout, but no numeric state is assumed safe
-        when its arm error is nonzero. This method never clears a fault.
-        """
+        """Poll fresh feedback for both target states and zero controller errors."""
         dcss = DCSS()
         deadline = time.monotonic() + timeout
         a_state, b_state, a_err, b_err = -1, -1, -1, -1
@@ -604,12 +564,10 @@ class TianjiChestDriver:
     # ==================== Home pose / release ====================
 
     def _wait_for_init_settle(self, left_target, right_target, timeout, should_abort=None):
-        """Require 0.25 s of advancing, close and nearly stationary feedback.
+        """Require 0.25 s of advancing bilateral feedback within the init limits.
 
-        Keep the existing strict <5 degree residual limit. A single close
-        frame is insufficient: both arm frame counters must keep advancing,
-        observed velocity must stay <=2 deg/s, and the window's joint spread
-        must stay <=0.25 degree before switching from position to impedance.
+        Joint residuals must be <5 degrees, finite-difference speeds <=2 deg/s,
+        and joint spread <=0.25 degree throughout the settling window.
         """
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError('settle timeout must be finite and nonnegative')
@@ -625,8 +583,7 @@ class TianjiChestDriver:
             left, right = self.get_current_joints()
             serials = tuple(self._feedback_guard.serials)
             now = time.monotonic()
-            # get_current_joints enforces freshness. Additionally require a
-            # new frame from EACH arm for every sample contributing to dwell.
+            # Count a settling sample only when both frame counters advance.
             new_frame = (previous_serials is None or
                          all(current != previous for current, previous
                              in zip(serials, previous_serials)))
@@ -719,7 +676,7 @@ class TianjiChestDriver:
         self.logger.info("Dual-arm STANDBY reached (cur_state=0)")
 
     def set_active(self, mode='joint', K=None, D=None):
-        """Explicit servo-on from fault-free feedback; never clears errors."""
+        """Enable impedance mode from fault-free controller feedback."""
         states = self.get_arm_controller_states()
         if any(state['err_code'] != 0 or state['cur_state'] not in (0, 1, 2, 3, 4)
                for state in states):
@@ -761,12 +718,7 @@ class TianjiChestDriver:
         self.logger.info(f"{'left' if arm == 'A' else 'right'} arm brake held")
 
     def clear_arm_error(self, arm: str = 'A', timeout=3.0):
-        """Request one explicit clear and confirm fresh, stable disabled state.
-
-        Native OnClearErr already sends the RESET parameter immediately; it
-        is void and is not a staged command or a success acknowledgement.
-        No extra send, enable, state change, or application-level retry follows.
-        """
+        """Send one immediate OnClearErr request, then confirm fresh state0/error0."""
         if arm not in ('A', 'B'):
             raise ValueError('arm must be A or B')
         if not math.isfinite(timeout) or timeout <= 0:

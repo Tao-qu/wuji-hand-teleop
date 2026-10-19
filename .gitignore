@@ -18,9 +18,6 @@ __pycache__/
 *.egg-info/
 dist/
 *.egg
-.pytest_cache/
-.coverage
-htmlcov/
 
 # Virtual environments
 venv/
@@ -51,10 +48,6 @@ src/input_devices/openvr_input/config/openvr_input.yaml
 *.tmp
 *.bak
 *.log
-INTEGRATION_PLAN.md
 work/
 src/wuji-description/
 src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml
-
-# Operator-specific MANUS calibration profiles and backups.
-config/local_calibration/

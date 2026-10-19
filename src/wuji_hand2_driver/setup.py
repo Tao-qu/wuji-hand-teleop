@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 setup(
     name="wuji_hand2_driver",
     version="0.1.0",
-    packages=find_packages(exclude=["test"]),
+    packages=find_packages(),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/wuji_hand2_driver"]),
         ("share/wuji_hand2_driver", ["package.xml"]),

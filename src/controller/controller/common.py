@@ -20,7 +20,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 class ArmState(Enum):
     """Arm-motor control state (mirrors SDK ARM_STATE)."""
     IMPEDANCE = "impedance"  # state=3, compliant (default; suited to teleop)
-    POSITION = "position"    # state=1, rigid (suited to payload testing)
+    POSITION = "position"    # state=1, joint-position control
 
 
 class ROS2LoggerAdapter:

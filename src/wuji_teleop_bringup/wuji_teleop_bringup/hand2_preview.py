@@ -1,8 +1,4 @@
-"""Actuator-free MANUS targets and Tracker diagnostics; no device transport.
-
-Targets use preview-only topics and original acquisition stamps. Model poses
-are desired geometry, not measured hardware or a collision-safety assessment.
-"""
+"""Visualize MANUS hand targets and Tracker poses on preview topics."""
 from __future__ import annotations
 
 import math
@@ -51,7 +47,7 @@ def status_marker_specs(snapshots):
 
 
 class HandPreview:
-    """Pure latest-frame conversion, with injectable session/clock for tests."""
+    """Convert the latest MANUS frame into hand preview targets."""
 
     def __init__(self, side, limits, timeout=0.2, *, retargeter=None, clock=time.monotonic):
         self.side, self.limits, self.timeout, self.clock = side, limits, timeout, clock
@@ -147,8 +143,7 @@ class TrackerPreview:
 
 
 def create_preview_node():
-    # ROS is imported only by this explicit entrypoint; pure tests use the
-    # classes above and never construct a ROS node or a physical hand.
+    # Load ROS dependencies when creating the preview node.
     from ament_index_python.packages import get_package_share_directory
     from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
     from manus_ros2_msgs.msg import ManusGlove

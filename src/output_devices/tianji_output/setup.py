@@ -7,7 +7,7 @@ package_name = 'tianji_output'
 setup(
     name=package_name,
     version='0.1.0',
-    packages=find_packages(exclude=['test']),
+    packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -21,7 +21,6 @@ setup(
             '_internal/lib/*.so',  # Linux shared libraries
             '_internal/lib/*.dll', # Windows DLLs (if needed)
             'config/*.MvKDCfg',    # Robot configuration files
-            'data/**/*',           # All data files recursively
         ],
     },
     install_requires=[
@@ -33,9 +32,4 @@ setup(
     maintainer_email='your_email@example.com',
     description='Tianji arm hardware interface library - exports TianjiArmController and TianjiChestDriver',
     license='MIT',
-    entry_points={
-        'console_scripts': [
-            'debug_arm_axis = tianji_output.tools.debug_arm_axis:main',
-        ],
-    },
 )
