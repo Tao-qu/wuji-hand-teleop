@@ -59,6 +59,10 @@ class FX_InvKineSolvePara(Structure):
         ("m_Output_IsOutRange", FX_BOOL),
         ("m_Output_IsDeg", FX_BOOL * 7),
         ("m_Output_JntExdTags", FX_BOOL * 7),
+        # Required by the bundled Linux libKine ABI: offset 344, followed by
+        # IsJntExd at 352 and the two Vect7 limits at 360/416 (472 bytes total).
+        # Omitting this field lets native IK write 16 bytes past the allocation.
+        ("m_Output_JntExdABS", FX_DOUBLE),
         ("m_Output_IsJntExd", FX_BOOL),
         ("m_Output_RunLmtP", Vect7),
         ("m_Output_RunLmtN", Vect7)

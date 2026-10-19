@@ -128,7 +128,8 @@ Each hand has a persistent retargeting session in a separate process. MANUS cont
 ```bash
 source tools/env.sh
 python3 tools/check_environment.py --mode all
-python3 -m unittest discover -s tests -v
+python3 -m pip install pytest
+python3 -m pytest -q tests
 ros2 topic hz /left_hand/joint_states
 ros2 topic echo /left_hand/lifecycle_state
 ros2 topic echo /left_hand/diagnostics

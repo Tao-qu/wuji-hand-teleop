@@ -63,6 +63,7 @@ export TIANJI_SDK_LIBRARY="/absolute/path/to/libMarvinSDK.so"
 
 `tools/env.sh` sources this optional file before loading ROS and the workspace. The control wrapper uses `TIANJI_SDK_LIBRARY` when set, otherwise the bundled library. The kinematics library remains the bundled `libKine.so`. `tools/check_environment.py` checks the selected control library; loading successfully is not proof that its protocol matches the cabinet. Use the controller's verified SDK endpoint, not an adjacent onboard computer's address. The arm connection issues a read-only VERSION request and checks actual controller feedback before proceeding; a successful socket bind alone is not connection readiness. Keep local library paths out of committed configuration.
 
+The bundled Linux kinematics library uses a 472-byte IK parameter structure, including `m_Output_JntExdABS`. The offline native test checks this layout and verifies that FK/IK calls do not overwrite adjacent memory. Keep its Python binding paired with the bundled library; another `libKine.so` may use a different structure. Restart running arm nodes after changing native bindings.
 
 ## 4. Configuration and build
 
@@ -82,7 +83,8 @@ python3 -m colcon build --symlink-install \
                -DPYTHON_EXECUTABLE="$VIRTUAL_ENV/bin/python3"
 source tools/env.sh
 python3 tools/check_environment.py --mode all
-python3 -m unittest discover -s tests -v
+python3 -m pip install pytest
+python3 -m pytest -q tests
 ```
 
 Load `tools/env.sh` in every new terminal. If the workspace path or interpreter changes, regenerate this project's `build/`, `install/`, and `log/` outputs and rebuild. Do not source an unrelated workspace over this one.
