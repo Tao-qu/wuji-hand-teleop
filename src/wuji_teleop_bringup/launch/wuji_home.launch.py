@@ -1,4 +1,4 @@
-"""Hold configured Home targets without MANUS or Tracker input readers."""
+"""Run one Home motion without MANUS or Tracker input readers."""
 import yaml
 
 from launch import LaunchDescription

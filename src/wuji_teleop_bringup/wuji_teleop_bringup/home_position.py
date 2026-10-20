@@ -15,7 +15,7 @@ from .launch_utils import resolve_config_path
 
 
 class HomePositionNode(Node):
-    """Keep Home targets active until the Home session is stopped."""
+    """Send Home targets for one motion, then close the session."""
 
     def __init__(self):
         super().__init__("home_position")
@@ -84,7 +84,7 @@ class HomePositionNode(Node):
                 logger=ROS2LoggerAdapter(self.get_logger()))
             self._arm_controller.set_position_mode(velRatio=100, AccRatio=100)
             result = self._arm_controller.move_to_init(
-                wait=True, timeout=15,
+                wait=False,
                 duration=float(self._arm_config["controller"]["home_duration_sec"]))
             if result is False:
                 self._set_error("Arm Home operation reported failure")
@@ -129,8 +129,6 @@ class HomePositionNode(Node):
         self._state_pub.publish(String(data=state))
         if state != self._last_state:
             self.get_logger().info(f"Home state: {state}")
-            if state == "ACTIVE":
-                self.get_logger().info("Home targets active; Stop or Ctrl-C ends the session")
             self._last_state = state
 
     def close(self):
@@ -165,8 +163,10 @@ def main(args=None):
         ros_thread.start()
         if node._use_arms:
             node._home_arms()
-        while rclpy.ok():
-            time.sleep(0.2)
+        else:
+            # Hand-only mode publishes Home targets for an eight-second motion.
+            time.sleep(8.0)
+        node._publish_status()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:

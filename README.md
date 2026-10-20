@@ -104,7 +104,7 @@ bash src/wuji_teleop_monitor/install_desktop.sh
 
 ## Return to Home
 
-In the monitor, stop the current session, select the hands + arms, hands-only, or arms-only preset, and click **Return Home**. This operation needs no MANUS gloves or Trackers. **Stop Home** ends the session; select **Start Teleop** to resume input following.
+In the monitor, stop the current session, select the hands + arms, hands-only, or arms-only preset, and click **Return Home**. This operation needs no MANUS gloves or Trackers. The session exits automatically after the Home motion; **Stop Home** interrupts it. Select **Start Teleop** to resume input following.
 
 The command-line script provides the same three modes and loads the project environment:
 
@@ -116,7 +116,7 @@ The command-line script provides the same three modes and loads the project envi
 
 Home reads `left_hand.home_joints` and `right_hand.home_joints` from `hand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros. Arm Home reads `left_arm.home_joints` and `right_arm.home_joints` from `tianji_chest.yaml`, in degrees, with the trajectory duration set by `controller.home_duration_sec`.
 
-The operation publishes hand targets through the existing hand transport and driver. Arms use the existing position-mode initialization and `move_to_init` trajectory, then remain in position mode. The session keeps the configured targets active until **Stop Home** or Ctrl-C, which closes the devices through their existing shutdown methods. Normal teleoperation startup is unchanged.
+The operation publishes hand targets through the existing hand transport and driver. Arms use the existing position-mode initialization and `move_to_init` trajectory with no additional wait after the motion. Arms-only and combined sessions exit when the configured trajectory finishes (8 seconds by default); hands-only sessions publish Home targets for 8 seconds and then exit. Exit disables and closes the selected devices through their existing shutdown methods. Device initialization and shutdown add time outside the motion interval. **Stop Home** or Ctrl-C interrupts the session. Normal teleoperation startup is unchanged.
 
 For direct ROS launch or a separate hand configuration:
 
