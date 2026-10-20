@@ -85,13 +85,15 @@ The arm configuration contains:
 - `openvr.tracker_serials`: `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, and `right_arm` serial numbers. `publish_rate_hz`, `publish_tf`, and `parent_frame` control Tracker publication.
 - `openvr.calibration_file`: the selected Tracker profile. A filename resolves in the package calibration directory (`src/input_devices/openvr_input/calibration` with `--symlink-install`); an absolute path is read directly. Directory lookup does not depend on a particular profile existing.
 
-Keep `driver.tool_dynamics.source: controller` to reuse the cabinet's payload values. To supply measured payloads, set `source: configured` and provide separate `left` and `right` arrays of ten values:
+The template selects `driver.tool_dynamics.source: configured` to apply separate `left` and `right` payload arrays of ten values. Set `source: controller` to reuse the cabinet's payload values instead:
 
 ```text
 [mass, com_x, com_y, com_z, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
 ```
 
-Confirm payload units and inertia conventions with the Tianji vendor before supplying configured values. Include the complete hand, adapter, and cable assembly. Payload units are separate from the kinematic translation units below.
+The configured values follow the Tianji load-identification implementation's convention: mass in kg, COM coordinates in mm, and inertia about the flange origin in kg·m². They represent the Wuji Hand 2 in its zero pose with the supplied mount, approximately 0.688 kg per side; additional cabling or mounting parts are not included. The driver passes these values directly to the SDK without conversion.
+
+The payload conversion assumes coincident Wuji mount and Tianji flange origins. Under the mounting directions described below, both hands use mount-to-flange rotation `diag(1, -1, -1)` (180 degrees about X). Apply this rotation to the COM and to both sides of the inertia tensor; the resulting left/right COM Y, Ixy, and Iyz have opposite signs. If the installation differs, recalculate the payload in the flange frame, including the parallel-axis shift when the origins differ. This payload conversion does not change the virtual hand-back TCP or Tracker calibration.
 
 `driver.tool_transforms.left` and `.right` are rigid 4×4 transforms from each robot flange to its virtual hand-back TCP. Their translation columns use millimetres; the TCP axes are chosen parallel to the corresponding flange axes, so the 3×3 rotation blocks are identity. Express the measured TCP position in the flange frame, including the installed adapter. The local Tianji IK uses these transforms once to solve for the flange pose. The Tracker target TF chain contains no additional copy of this tool translation.
 

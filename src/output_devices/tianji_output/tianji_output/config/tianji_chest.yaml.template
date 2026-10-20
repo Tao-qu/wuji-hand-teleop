@@ -22,7 +22,12 @@ driver:
       - [0, 0, 1, 70]
       - [0, 0, 0, 1]
   tool_dynamics:
-    source: controller
+    source: configured
+    # Tianji flange frame: mass kg, COM mm, inertia about the flange origin kg*m^2.
+    # Mount/flange origins assumed coincident; mount -> flange rotation: Rx(pi).
+    # Order: mass, com_x, com_y, com_z, Ixx, Ixy, Ixz, Iyy, Iyz, Izz.
+    left:  [0.688, 6.8, -1.8, 91.8, 0.00754, -0.00009, -0.00030, 0.00822, 0.00024, 0.00083]
+    right: [0.688, 6.8, 1.8, 91.8, 0.00754, 0.00009, -0.00030, 0.00822, -0.00024, 0.00083]
 
 controller:
   control_rate: 120.0
