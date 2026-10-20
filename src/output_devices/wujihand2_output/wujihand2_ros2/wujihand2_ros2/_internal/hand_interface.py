@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 
 
-class WujiHand:
+class WujiHand2:
     """Publish targets and read feedback through the Hand 2 ROS driver.
 
     The bridge publishes states in SDK firmware order (five fingers, four joints

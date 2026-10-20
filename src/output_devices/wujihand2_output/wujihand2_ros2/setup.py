@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 from glob import glob
 import os
 
-package_name = 'wujihand_output'
+package_name = 'wujihand2_ros2'
 
 setup(
     name=package_name,
@@ -22,12 +22,13 @@ setup(
         'wuji-sdk==2026.10.12',
     ],
     zip_safe=True,
-    maintainer='wuji',
-    maintainer_email='your_email@example.com',
-    description='Wuji Hand 2 official retargeting and ROS bridge command interface',
+    maintainer='Teleoperation maintainers',
+    maintainer_email='support@wuji.tech',
+    description='Wuji Hand 2 SDK driver, official retargeting and ROS command interface',
     license='MIT',
     entry_points={
         'console_scripts': [
+            'wujihand2_driver = wujihand2_ros2.driver_node:main',
         ],
     },
 )

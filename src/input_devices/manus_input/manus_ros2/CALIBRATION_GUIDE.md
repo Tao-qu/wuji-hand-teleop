@@ -37,7 +37,7 @@ The publisher declares two string parameters:
 | `left_calibration_file` | Package-share `calibration/tpxLeftMetaglovePro.mcal` |
 | `right_calibration_file` | Package-share `calibration/tpxRightMetaglovePro.mcal` |
 
-For normal bringup, edit the `manus` block in the local `src/output_devices/wujihand_output/config/hand2.yaml`:
+For normal bringup, edit the `manus` block in the local `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml`:
 
 ```yaml
 manus:

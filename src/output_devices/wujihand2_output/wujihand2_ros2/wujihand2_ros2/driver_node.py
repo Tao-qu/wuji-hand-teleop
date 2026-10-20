@@ -19,9 +19,9 @@ from .joint_mapping import FINGERS, joint_names, joint_vector, nid_to_index
 from .sdk_backend import SdkBackend, Snapshot
 
 
-class Hand2DriverNode(Node):
+class WujiHand2DriverNode(Node):
     def __init__(self):
-        super().__init__("wuji_hand2_driver")
+        super().__init__("wujihand2_driver")
         defaults = {
             "serial_number": "", "expected_side": "", "auto_enable": True,
             "command_rate": 200.0, "publish_rate": 200.0, "diagnostics_rate": 10.0,
@@ -264,7 +264,7 @@ def main(args=None):
                 for sig in (signal.SIGINT, signal.SIGTERM)}
     node = None
     try:
-        node = Hand2DriverNode()
+        node = WujiHand2DriverNode()
         initializing = False
         if not stopping:
             executor.add_node(node)

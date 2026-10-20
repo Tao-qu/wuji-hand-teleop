@@ -26,7 +26,7 @@ setup(
     license='MIT',
     entry_points={
         'console_scripts': [
-            'hand2_preview = wuji_teleop_bringup.hand2_preview:main',
+            'wujihand2_preview = wuji_teleop_bringup.wujihand2_preview:main',
             'home_position = wuji_teleop_bringup.home_position:main',
         ],
     },

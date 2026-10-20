@@ -29,7 +29,7 @@ def ordered_positions(side, names, positions):
     return [float(values.get(name, math.nan)) for name in joint_names(side)]
 
 
-def scan_hand2(log, sdk=None):
+def scan_wujihand2(log, sdk=None):
     """Discover Hand 2 devices and read their metadata."""
     if sdk is None:
         import wuji_sdk as sdk

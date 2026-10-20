@@ -6,11 +6,11 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from ._internal.hand_interface import WujiHand
-from .retargeting import Hand2Retargeter
+from ._internal.hand_interface import WujiHand2
+from .retargeting import WujiHand2Retargeter
 
 
-class WujiHandController:
+class WujiHand2Controller:
     """One controller per side; construction never enables the hardware."""
 
     NUM_JOINTS = 20
@@ -21,8 +21,8 @@ class WujiHandController:
         self.side = side
         self.hand_name = hand_name
         self.logger = logger or logging.getLogger(f"WujiHand2Controller_{side}")
-        self.retargeter = Hand2Retargeter(side)
-        self.hand: Optional[WujiHand] = WujiHand(hand_name, side, node, self.logger)
+        self.retargeter = WujiHand2Retargeter(side)
+        self.hand: Optional[WujiHand2] = WujiHand2(hand_name, side, node, self.logger)
         self.logger.info(f"{side} Wuji Hand 2 ready; official SDK retargeting")
 
     def set_joint_positions(self, positions: np.ndarray) -> bool:

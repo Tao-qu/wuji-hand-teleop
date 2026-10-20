@@ -14,7 +14,7 @@
   <depend>diagnostic_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>wuji_teleop_bringup</depend>
-  <depend>wujihand_output</depend>
+  <depend>wujihand2_ros2</depend>
   <exec_depend>tianji_output</exec_depend>
   <exec_depend>python3-ruamel.yaml</exec_depend>
 

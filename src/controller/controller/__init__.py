@@ -2,10 +2,10 @@
 
 from .common import ROS2LoggerAdapter
 from .tianji_arm_node import TianjiArmControllerNode
-from .wujihand_node import WujiHandControllerNode
+from .wujihand2_node import WujiHand2ControllerNode
 
 __all__ = [
     'ROS2LoggerAdapter',
     'TianjiArmControllerNode',
-    'WujiHandControllerNode',
+    'WujiHand2ControllerNode',
 ]

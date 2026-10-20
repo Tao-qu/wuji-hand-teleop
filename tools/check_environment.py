@@ -19,7 +19,7 @@ def main():
     errors = []
     modules = ["rclpy", "yaml", "numpy", "scipy", "PyQt5.QtWidgets"]
     if args.mode != "arms":
-        modules += ["wuji_sdk", "wuji_hand2_driver", "wujihand_output"]
+        modules += ["wuji_sdk", "wujihand2_ros2"]
     if args.mode != "hands":
         modules += ["openvr"]
     for name in modules:

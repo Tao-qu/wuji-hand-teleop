@@ -23,7 +23,7 @@ from PyQt5.QtGui import QFont
 HAND_FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
 HAND_JOINTS = ['S1', 'S2', 'S3', 'S4']
 
-from .hand2_support import JOINT_LABELS
+from .wujihand2_support import JOINT_LABELS
 
 
 class JointDisplayPanel(QGroupBox):

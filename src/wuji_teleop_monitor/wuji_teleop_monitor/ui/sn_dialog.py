@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
 
 from ament_index_python.packages import get_package_share_directory
 
-from .hand2_support import scan_hand2
+from .wujihand2_support import scan_wujihand2
 
 LogCallback = Callable[[str], None]
 
@@ -119,13 +119,13 @@ def _dump_to_string(data, yaml_handle) -> str:
 
 # -------------------- Scanners --------------------
 
-class WujiHandScanner:
+class WujiHand2Scanner:
     """Use official SDK network discovery and read-only device identification."""
 
     @classmethod
     def scan(cls, log: LogCallback) -> List[dict]:
         try:
-            return scan_hand2(log)
+            return scan_wujihand2(log)
         except ImportError:
             log("Wuji Hand 2 scan: install the pinned wuji-sdk Python package")
         except Exception as exc:
@@ -394,7 +394,7 @@ class ScanSNDialog(QDialog):
             self._loading_label = None
 
     def _scan_worker(self) -> None:
-        hands = WujiHandScanner.scan(self._log)
+        hands = WujiHand2Scanner.scan(self._log)
         try:
             self._results_signal.emit(hands)
         except RuntimeError:
@@ -419,7 +419,7 @@ class ScanSNDialog(QDialog):
             f"Found {len(hands)} Wuji Hand 2 device(s); no motors enabled.")
         self._rescan_btn.setEnabled(True)
 
-        hand_yaml = _resolve_config_path("wujihand_output", "hand2.yaml")
+        hand_yaml = _resolve_config_path("wujihand2_ros2", "wujihand2.yaml")
 
         self._results_host_layout.addWidget(self._build_group(
             "Wuji Hand 2", hands, hand_yaml, "hand",

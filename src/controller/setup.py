@@ -23,7 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'tianji_arm_controller = controller.tianji_arm_node:main',
-            'wujihand_controller = controller.wujihand_node:main',
+            'wujihand2_controller = controller.wujihand2_node:main',
         ],
     },
 )

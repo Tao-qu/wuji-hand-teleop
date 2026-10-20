@@ -41,7 +41,7 @@ tools/env.local.sh
 # Repo tracks `<file>.yaml.template` only. Operator copies the template
 # to `<file>.yaml`, fills real values, and the live file stays out of git.
 # Launch helpers + Scan SNs UI both read the single `<file>.yaml` path.
-src/output_devices/wujihand_output/config/hand2.yaml
+src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml
 
 # Temporary files
 *.tmp

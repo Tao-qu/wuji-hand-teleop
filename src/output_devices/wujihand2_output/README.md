@@ -1,6 +1,10 @@
 # Wuji Hand 2 ROS adapter
 
-This package connects each configured hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Run one driver process per hand with its serial number and left/right namespace. The main [project README](../../README.md) covers installation and launch commands.
+The `wujihand2_ros2` package connects each configured hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Run one driver process per hand with its serial number and left/right namespace. The main [project README](../../../README.md) covers installation and launch commands.
+
+The package lives in `wujihand2_ros2/` under this directory. It contains the SDK driver, official retargeting wrapper, MANUS keypoint conversion, and ROS command interface. The outer `wujihand2_output` directory groups these files and is not a ROS package.
+
+The driver executable is `wujihand2_driver`. Normal teleoperation and Home start it through the unified bringup entrypoint. Configuration is stored in `wujihand2_ros2/config/wujihand2.yaml`, generated from the adjacent template; the package installs it as `share/wujihand2_ros2/config/wujihand2.yaml`.
 
 ## Parameters
 
@@ -15,7 +19,7 @@ This package connects each configured hand through the official `wuji-sdk==2026.
 | `kp` | `3.0` | SDK MIT proportional gain |
 | `kd` | `0.05` | SDK MIT derivative gain |
 
-The launch file loads the local `hand2.yaml` driver block, then supplies the selected serial, side, and `hand_auto_enable` argument. Local gains may differ from the template defaults.
+The launch file loads the local `wujihand2.yaml` driver block, then supplies each hand's serial, side, and fixed `auto_enable: true`. Local gains may differ from the template defaults.
 
 ## Topics and services
 

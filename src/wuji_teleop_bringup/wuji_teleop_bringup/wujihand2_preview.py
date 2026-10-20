@@ -1,9 +1,9 @@
 """Visualize MANUS hand targets and Tracker poses on preview topics."""
 from __future__ import annotations
 
-from wujihand_output.keypoints import manus_to_keypoints
-from wujihand_output.retargeting import Hand2Retargeter
-from wuji_hand2_driver.joint_mapping import joint_names
+from wujihand2_ros2.keypoints import manus_to_keypoints
+from wujihand2_ros2.retargeting import WujiHand2Retargeter
+from wujihand2_ros2.joint_mapping import joint_names
 
 
 TRACKERS = ("chest", "left_hand_back", "right_hand_back", "left_arm", "right_arm")
@@ -46,7 +46,7 @@ class HandPreview:
 
     def __init__(self, side):
         self.names = joint_names(side)
-        self.retargeter = Hand2Retargeter(side)
+        self.retargeter = WujiHand2Retargeter(side)
         self.latest = None
         self.state, self.reason = "NO_INPUT", "Waiting for MANUS frames"
         self.sequence = self.stamp_ns = self.accepted = self.published = self.rejected = 0
@@ -104,7 +104,7 @@ def create_preview_node():
 
     class PreviewNode(Node):
         def __init__(self):
-            super().__init__("hand2_preview", namespace="preview", enable_rosout=False)
+            super().__init__("wujihand2_preview", namespace="preview", enable_rosout=False)
             self.declare_parameter("control_rate", 120.0)
             rate = float(self.get_parameter("control_rate").value)
             self.hands = {side: HandPreview(side) for side in ("left", "right")}

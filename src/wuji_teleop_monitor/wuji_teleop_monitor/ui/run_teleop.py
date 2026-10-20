@@ -28,7 +28,7 @@ from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter
 from PyQt5.QtSvg import QSvgRenderer
 
 from .joint_panel import JointDisplayPanel
-from .hand2_support import FINGERS, ordered_positions
+from .wujihand2_support import FINGERS, ordered_positions
 from .sn_dialog import ScanSNDialog
 from .theme import DARK_THEME_CSS, LOG_TEXTEDIT_CSS
 

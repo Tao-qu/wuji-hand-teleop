@@ -33,7 +33,7 @@ python3 -m pip install -r requirements.txt
 
 The environment inherits ROS and Qt packages. `requirements.txt` pins `wuji-sdk==2026.10.12`; the SDK contains the Hand 2 retargeting runtime, and its NumPy interface is used directly. No separate retargeting project is installed.
 
-`dependencies.lock.json` pins the official `wuji-description` revision. The fetch tool checks out only `hand2/hand2_2/body` under `src/wuji-description`, providing the `wuji_hand2_2_description` ROS package. It rejects changed revisions or dirty existing checkouts rather than resetting them. The rest of the driver is maintained in this repository under `src/wuji_hand2_driver`.
+`dependencies.lock.json` pins the official `wuji-description` revision. The fetch tool checks out only `hand2/hand2_2/body` under `src/wuji-description`, providing the `wuji_hand2_2_description` ROS package. It rejects changed revisions or dirty existing checkouts rather than resetting them. The rest of the driver is maintained in this repository under `src/output_devices/wujihand2_output/wujihand2_ros2`.
 
 ## 3. SDK libraries and device access
 
@@ -50,7 +50,7 @@ sudo udevadm trigger
 
 Log out and back in after changing groups, then reconnect the MANUS receivers. SDK licensing and calibration are separate from USB permissions. SteamVR handles Tracker pairing and access; see [SteamVR setup](STEAMVR.md).
 
-Wuji Hand 2 uses the official network SDK. Configure each hand's serial number in `hand2.yaml`; the official SDK discovers its network address. Place the host and hands on a network where SDK discovery works. The Tianji cabinet IP is set separately in `tianji_chest.yaml`; configure it for the actual cabinet instead of assuming the template address applies.
+Wuji Hand 2 uses the official network SDK. Configure each hand's serial number in `wujihand2.yaml`; the official SDK discovers its network address. Place the host and hands on a network where SDK discovery works. The Tianji cabinet IP is set separately in `tianji_chest.yaml`; configure it for the actual cabinet instead of assuming the template address applies.
 
 `tools/env.sh` adds the MANUS and Tianji library directories to the process environment and selects the project Python packages. It does not modify global SDK libraries.
 
@@ -67,7 +67,7 @@ The bundled Linux kinematics library uses a 472-byte IK parameter structure, inc
 
 ## 4. Configuration and build
 
-Fill in the two local files generated from templates: `src/output_devices/wujihand_output/config/hand2.yaml` and `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`. Prepare MANUS calibration files for the current operator before running input. The hand configuration contains:
+Fill in the two local files generated from templates: `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml` and `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`. Prepare MANUS calibration files for the current operator before running input. The hand configuration contains:
 
 - `left_hand` and `right_hand`: unique `serial_number` and ROS `name`.
 - `driver`: command, feedback publication, and diagnostic rates; MIT gains `kp`/`kd`; and `auto_enable` (default `true`).
@@ -132,7 +132,7 @@ ros2 run wuji_teleop_bringup wuji_teleop.launch.py
 
 Use `--disable-arm` for both hands only, or `--disable-hand` for both arms only. Add `--home` to return the selected devices Home and exit without input readers. Automatic enable is fixed on. Teleoperation waits three seconds after arm Home, or after hand initialization in hands-only mode; combined-mode hands wait for arm readiness. Use `--help` to list the three operation switches.
 
-Teleoperation and Home load the fixed local `hand2.yaml` and `tianji_chest.yaml`. Preview and the standalone OpenVR launch still accept `arm_config:=/absolute/path/to/tianji_chest.yaml`; leaving it empty selects the local arm configuration installed in the `tianji_output` package. Use `ros2 run` for the teleoperation/Home switches because native `ros2 launch` expects `name:=value` arguments.
+Teleoperation and Home load the fixed local `wujihand2.yaml` and `tianji_chest.yaml`. Preview and the standalone OpenVR launch still accept `arm_config:=/absolute/path/to/tianji_chest.yaml`; leaving it empty selects the local arm configuration installed in the `tianji_output` package. Use `ros2 run` for the teleoperation/Home switches because native `ros2 launch` expects `name:=value` arguments.
 
 The hand bridge sets MIT gains and sends the latest 20-joint target through the official SDK. The SDK and hand firmware manage motor control; the project does not configure a current limit or add command timeout, ramp, or joint-limit interlocks. The GUI displays feedback and diagnostics and provides Enable/Disable buttons. The hand driver also exposes SDK emergency-stop and clear-fault operations as ROS services. See the [README](../README.md) for launch options and services.
 

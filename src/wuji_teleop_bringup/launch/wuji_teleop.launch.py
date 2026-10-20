@@ -35,7 +35,7 @@ def _nodes(context):
     hand, arm = not options.disable_hand, not options.disable_arm
     nodes = []
     if hand:
-        with open(resolve_config_path("wujihand_output", "hand2.yaml")) as stream:
+        with open(resolve_config_path("wujihand2_ros2", "wujihand2.yaml")) as stream:
             config = yaml.safe_load(stream)
         if not options.home:
             nodes.append(Node(
@@ -45,14 +45,14 @@ def _nodes(context):
             cfg = config[f"{side}_hand"]
             name = cfg.get("name", f"{side}_hand")
             nodes.append(Node(
-                package="wuji_hand2_driver", executable="wuji_hand2_driver",
-                name="wuji_hand2_driver", namespace=name, output="screen",
+                package="wujihand2_ros2", executable="wujihand2_driver",
+                name="wujihand2_driver", namespace=name, output="screen",
                 parameters=[dict(config.get("driver", {}), serial_number=str(cfg["serial_number"]),
                                  expected_side=side, auto_enable=True)]))
             if not options.home:
                 nodes.append(Node(
-                    package="controller", executable="wujihand_controller",
-                    name=f"wujihand_controller_{side}", output="screen",
+                    package="controller", executable="wujihand2_controller",
+                    name=f"wujihand2_controller_{side}", output="screen",
                     parameters=[dict(config.get("controller", {}),
                                      wait_for_arm=arm, startup_wait_sec=3.0)],
                     arguments=["--side", side, "--hand-name", name]))

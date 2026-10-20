@@ -6,7 +6,7 @@ import shutil
 
 
 CONFIG_TEMPLATES = (
-    "src/output_devices/wujihand_output/config/hand2.yaml.template",
+    "src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml.template",
     "src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml.template",
 )
 

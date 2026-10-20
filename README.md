@@ -30,7 +30,7 @@ The fetch tool installs the pinned official model under `src/wuji-description`, 
 
 | Configuration | Purpose |
 | --- | --- |
-| `src/output_devices/wujihand_output/config/hand2.yaml` | Hand serials and namespaces, Home joint positions, SDK/ROS rates, MIT gains, and MANUS parameters |
+| `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml` | Hand serials and namespaces, Home joint positions, SDK/ROS rates, MIT gains, and MANUS parameters |
 | `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Arm Home, driver/controller settings, five Tracker serials, and calibration profile selection |
 | `src/input_devices/openvr_input/calibration/tracker-neutral.yaml` | Chest transforms, hand-back-to-TCP orientations, and upper-arm mounting rotations |
 
@@ -70,7 +70,7 @@ ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-hand
 | `--disable-arm` | Off | Omit both arms and Trackers |
 | `--home` | Off | Return the selected devices Home, then exit |
 
-Use `--help` for usage. The two disable switches cannot be combined. Teleoperation and Home load the fixed local `hand2.yaml` and `tianji_chest.yaml`; automatic enable is always on. Teleoperation uses a fixed three-second preparation interval after arm Home, or after hand initialization in hands-only mode. In combined mode, the hands wait for the arms to become ready. RViz is available through the separate Preview entrypoint.
+Use `--help` for usage. The two disable switches cannot be combined. Teleoperation and Home load the fixed local `wujihand2.yaml` and `tianji_chest.yaml`; automatic enable is always on. Teleoperation uses a fixed three-second preparation interval after arm Home, or after hand initialization in hands-only mode. In combined mode, the hands wait for the arms to become ready. RViz is available through the separate Preview entrypoint.
 
 Use `ros2 run` for these switches: native `ros2 launch` expects `name:=value` arguments and cannot pass custom `--` options. The bare `ros2 launch wuji_teleop_bringup wuji_teleop.launch.py` command still starts the default hands + arms mode.
 
@@ -106,7 +106,7 @@ ros2 run wuji_teleop_bringup wuji_teleop.launch.py --home --disable-hand  # Arms
 ros2 run wuji_teleop_bringup wuji_teleop.launch.py --home --disable-arm   # Hands only
 ```
 
-Home reads `left_hand.home_joints` and `right_hand.home_joints` from `hand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros. Arm Home reads `left_arm.home_joints` and `right_arm.home_joints` from `tianji_chest.yaml`, in degrees, with the trajectory duration set by `controller.home_duration_sec`.
+Home reads `left_hand.home_joints` and `right_hand.home_joints` from `wujihand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros. Arm Home reads `left_arm.home_joints` and `right_arm.home_joints` from `tianji_chest.yaml`, in degrees, with the trajectory duration set by `controller.home_duration_sec`.
 
 The operation publishes hand targets through the existing hand transport and driver. Arms use the existing position-mode initialization and `move_to_init` trajectory with no additional wait after the motion. Arms-only and combined sessions exit when the configured trajectory finishes (8 seconds by default); hands-only sessions publish Home targets for 8 seconds and then exit. Exit disables and closes the selected devices through their existing shutdown methods. Device initialization and shutdown add time outside the motion interval. **Stop Home** or Ctrl-C interrupts the session. Normal teleoperation startup is unchanged.
 
@@ -128,7 +128,7 @@ Preview and the standalone OpenVR launch accept `arm_config:=/absolute/path/to/t
 ```text
 MANUS → manus_ros2 → 21 keypoints per side
       → official RetargetSession(WujiHand2)
-      → /{side}_hand/joint_commands → wuji_hand2_driver → SDK → hand
+      → /{side}_hand/joint_commands → wujihand2_driver → SDK → hand
 
 5 Trackers → OpenVR → TF → tianji_arm_controller → Tianji IK/SDK → arms
 ```
@@ -142,8 +142,7 @@ Each hand uses one persistent SDK retargeting session in its own controller proc
 | `src/input_devices/manus_input/` | MANUS C++ publisher, messages, and calibration |
 | `src/input_devices/openvr_input/` | Five-Tracker acquisition and TF |
 | `src/controller/` | Per-hand input loops and arm lifecycle |
-| `src/output_devices/wujihand_output/` | Landmark mapping, official retargeting, and ROS transport |
-| `src/wuji_hand2_driver/` | Hand 2 SDK commands, feedback, and diagnostics |
+| `src/output_devices/wujihand2_output/` | Hand 2 SDK/ROS adapter, official retargeting, and configuration |
 | `src/wuji-description/hand2/hand2_2/body/` | Pinned official model package |
 | `src/output_devices/tianji_output/` | Tianji SDK/IK and tool parameters |
 | `src/wuji_teleop_bringup/` | Launch configuration, preview, and static transforms |

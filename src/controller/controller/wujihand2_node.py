@@ -11,16 +11,16 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.utilities import remove_ros_args
 from std_msgs.msg import Int8, String
 
-from wujihand_output import WujiHandController
-from wujihand_output.keypoints import manus_to_keypoints
+from wujihand2_ros2 import WujiHand2Controller
+from wujihand2_ros2.keypoints import manus_to_keypoints
 from .common import ROS2LoggerAdapter, get_default_qos, run_ros_node
 
 
-class WujiHandControllerNode(Node):
+class WujiHand2ControllerNode(Node):
     """Consume the latest MANUS message once per control tick."""
 
     def __init__(self, side: str, hand_name: str):
-        super().__init__(f"wujihand_controller_{side}")
+        super().__init__(f"wujihand2_controller_{side}")
         self._side = side
         self.declare_parameter("control_rate", 120.0)
         self.declare_parameter("flip_y", False)
@@ -35,7 +35,7 @@ class WujiHandControllerNode(Node):
         self._startup_wait_sec = float(self.get_parameter("startup_wait_sec").value)
         self._latest_keypoints = None
         self._keypoints_lock = threading.Lock()
-        self.controller = WujiHandController(
+        self.controller = WujiHand2Controller(
             side=side, hand_name=hand_name, node=self,
             logger=ROS2LoggerAdapter(self.get_logger()))
         from manus_ros2_msgs.msg import ManusGlove
@@ -107,10 +107,10 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None):
-    raw_argv = sys.argv if argv is None else ["wujihand_controller", *argv]
+    raw_argv = sys.argv if argv is None else ["wujihand2_controller", *argv]
     args = _parse_args(remove_ros_args(raw_argv)[1:])
     run_ros_node(
-        lambda: WujiHandControllerNode(args.side, args.hand_name or f"{args.side}_hand"),
+        lambda: WujiHand2ControllerNode(args.side, args.hand_name or f"{args.side}_hand"),
         args=raw_argv)
 
 

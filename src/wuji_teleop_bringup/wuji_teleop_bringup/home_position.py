@@ -39,13 +39,13 @@ class HomePositionNode(Node):
         self._state_pub = self.create_publisher(String, "/wuji_home/state", state_qos)
         command_rate = 120.0
         if mode in ("both", "hands"):
-            from wujihand_output._internal.hand_interface import WujiHand
+            from wujihand2_ros2._internal.hand_interface import WujiHand2
 
-            hand_config = load_yaml_config(resolve_config_path("wujihand_output", "hand2.yaml"))
+            hand_config = load_yaml_config(resolve_config_path("wujihand2_ros2", "wujihand2.yaml"))
             command_rate = float(hand_config.get("controller", {}).get("control_rate", 120.0))
             for side in ("left", "right"):
                 config = hand_config[f"{side}_hand"]
-                hand = WujiHand(config.get("name", f"{side}_hand"), side, self)
+                hand = WujiHand2(config.get("name", f"{side}_hand"), side, self)
                 self._hands[side] = (hand, config["home_joints"])
 
         self._arm_state_pubs = {}

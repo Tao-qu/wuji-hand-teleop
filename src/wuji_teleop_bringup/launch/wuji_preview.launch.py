@@ -31,7 +31,7 @@ def _nodes(context):
             Node(package="openvr_input", executable="openvr_input", name="preview_openvr",
                  output="screen", arguments=["-c", str(config_path)], remappings=TF_REMAPS),
         ]
-    preview = Node(package="wuji_teleop_bringup", executable="hand2_preview", output="screen")
+    preview = Node(package="wuji_teleop_bringup", executable="wujihand2_preview", output="screen")
     nodes.append(preview)
     model = Path(get_package_share_directory("wuji_hand2_2_description")) / "urdf"
     for side, x in (("left", -0.18), ("right", 0.18)):

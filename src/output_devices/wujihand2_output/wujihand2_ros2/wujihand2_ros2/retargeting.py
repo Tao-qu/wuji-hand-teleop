@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 
-class Hand2Retargeter:
+class WujiHand2Retargeter:
     """One persistent SDK session per hand, producing firmware-order radians."""
 
     def __init__(self, side: str, *, session=None):
