@@ -46,6 +46,8 @@ class OpenVRTrackerWrapper:
                         e.g., {'chest': 'LHR-xxx', 'right_wrist': 'LHR-yyy', 'left_wrist': 'LHR-zzz'}
         wrist_offset: Optional offset [x, y, z] in tracker's local frame (meters).
                      Applied before coordinate correction to map tracker position to wrist.
+        upper_arm_rotations: Optional left_arm/right_arm 3x3 rotations. Columns
+                             are calibrated-frame axes in the raw tracker frame.
 
     Example:
         >>> wrapper = OpenVRTrackerWrapper({
@@ -82,10 +84,17 @@ class OpenVRTrackerWrapper:
         [0, 0, 0, 1]
     ], dtype=np.float32)
 
-    def __init__(self, tracker_serials: Dict[str, str], wrist_offset: Optional[list] = None):
+    def __init__(self, tracker_serials: Dict[str, str], wrist_offset: Optional[list] = None,
+                 upper_arm_rotations: Optional[Dict[str, list]] = None):
         ## YOU HAVE TO RUN STEAMVR FIRST
         self.tracker_serials = tracker_serials
         self._wrist_offset = np.array(wrist_offset, dtype=np.float32) if wrist_offset else None
+        self._upper_arm_corrections = {}
+        for role in ('left_arm', 'right_arm'):
+            correction = np.eye(4, dtype=np.float32)
+            correction[:3, :3] = np.asarray(
+                (upper_arm_rotations or {}).get(role, np.eye(3)), dtype=np.float32)
+            self._upper_arm_corrections[role] = correction
         self._vr_system: Optional[openvr.VRSystem] = None
         self._is_connected = False
         self._detected_trackers: Dict[int, str] = {}  # device_index -> role
@@ -209,8 +218,8 @@ class OpenVRTrackerWrapper:
                 elif role == 'left_wrist':
                     corrected_pose = raw_pose @ self._LEFT_WRIST_CORRECTION
                 elif role in ('left_arm', 'right_arm'):
-                    # Upper arm tracker: no coordinate correction, only used for direction vector projection
-                    corrected_pose = raw_pose
+                    # Calibrated local Y supplies the upper-arm reference direction.
+                    corrected_pose = raw_pose @ self._upper_arm_corrections[role]
                 else:
                     corrected_pose = raw_pose
 

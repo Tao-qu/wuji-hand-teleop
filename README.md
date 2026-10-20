@@ -31,13 +31,15 @@ The fetch tool installs the pinned official model under `src/wuji-description`, 
 | Configuration | Purpose |
 | --- | --- |
 | `src/output_devices/wujihand_output/config/hand2.yaml` | Hand serials and namespaces, Home joint positions, SDK/ROS rates, MIT gains, and MANUS parameters |
-| `src/input_devices/openvr_input/config/openvr_input.yaml` | Five Tracker serials and wrist mounting offset |
+| `src/input_devices/openvr_input/config/openvr_input.yaml` | Five Tracker serials, wrist mounting offset, and upper-arm mounting rotations |
 | `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet IP, initial joint angles, tool dynamics source, and optional tool transforms |
 | `src/wuji_teleop_bringup/config/static_transforms.yaml` | Chest and wrist coordinate transforms |
 
 MANUS publishes right-handed coordinates. `controller.flip_y: false` preserves those XYZ positions for the SDK's built-in retargeting model. The bundled profiles retain the filenames `tpxLeftMetaglovePro.mcal` and `tpxRightMetaglovePro.mcal`; select other profiles through `manus.left_calibration_file` and `manus.right_calibration_file`. See the [MANUS guide](src/input_devices/manus_input/README.md).
 
 `tool_dynamics.source: controller` reuses the cabinet's payload values. Select `configured` to supply independent left/right mass, centre-of-mass, and inertia arrays as described in the template. Tool-transform translations use millimetres; Tracker offsets use metres. Apply a geometric tool offset once, in either the IK configuration or target TF chain.
+
+Neutral-pose calibration aligns the operator's starting pose with the configured arm Home. `chest_mount.<side>.local_xyz` and `wrist_to_tianji` in `static_transforms.yaml` store wrist position and orientation offsets. `upper_arm_rotations.left_arm/right_arm` in the local OpenVR YAML store 3×3 tracker-local mounting rotations; their Y columns provide the calibrated arm reference directions to the existing IK. These fixed offsets preserve subsequent relative motion. Recalibrate after changing Tracker mounting or the reference Home pose, then restart teleoperation to load the values.
 
 ## Start teleoperation
 

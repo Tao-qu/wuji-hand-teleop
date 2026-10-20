@@ -21,6 +21,18 @@ tracker_serials:
 # For human data record system, the trackers are replaced
 wrist_offset: [0.0, -0.00275, 0.0535]
 
+# Columns are calibrated-frame axes in the raw upper-arm tracker frame.
+# The calibrated Y axis supplies the arm reference direction; defaults are identity.
+upper_arm_rotations:
+  left_arm:
+    - [1.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
+  right_arm:
+    - [1.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
+
 # Publishing settings
 publish_rate_hz: 120.0
 

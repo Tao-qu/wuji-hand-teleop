@@ -43,6 +43,9 @@ class OpenVRInputConfig:
     # Applied before coordinate correction to map tracker position to actual wrist
     wrist_offset: Optional[list] = None
 
+    # Tracker-local rotations for the calibrated upper-arm frames.
+    upper_arm_rotations: Optional[Dict[str, list]] = None
+
     # Publishing settings
     publish_rate_hz: float = 120.0
 
@@ -103,7 +106,8 @@ class OpenVRInputNode(Node):
         # Initialize OpenVR tracker wrapper
         self.tracker_wrapper = OpenVRTrackerWrapper(
             self.config.tracker_serials,
-            wrist_offset=self.config.wrist_offset
+            wrist_offset=self.config.wrist_offset,
+            upper_arm_rotations=self.config.upper_arm_rotations,
         )
 
         # Create TF broadcaster

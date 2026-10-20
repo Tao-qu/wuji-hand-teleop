@@ -13,38 +13,38 @@ chest_mount:
     roll: 1.5708
     pitch: 0.0
     yaw: -1.5708
-    # Local translation (left_chest_base frame)
-    local_x: 0.0
-    local_y: 0.0
-    local_z: 0.037
+    # Neutral wrist position calibrated to arm Home (left_chest_base frame, m).
+    local_x: -0.15366554829414047
+    local_y: 0.03816230409229554
+    local_z: 0.10648765803889387
 
   right:
     roll: 1.5708
     pitch: 0.0
     yaw: 1.5708
-    local_x: 0.0
-    local_y: 0.0
-    local_z: 0.037
+    # Neutral wrist position calibrated to arm Home (right_chest_base frame, m).
+    local_x: -0.10580115819498509
+    local_y: -0.042273813019709894
+    local_z: 0.11544837576791178
 
-# Wrist to Tianji TF for trackers mounted on the backs of the hands.
-# Palm-down mounting: flange +Y points down on the left, -Y on the right.
-# Post-multiply the original rotations by local Rz(-90 deg) / Rz(+90 deg).
-# This preserves the target Z axis and translation.
+# Wrist to Tianji TF: captured neutral hand orientations align with arm Home.
+# Tracker-local offsets preserve subsequent world-frame rotation increments.
+# Translation remains at the wrist origin.
 wrist_to_tianji:
   left:
     x: 0.0
     y: 0.0
     z: 0.0
-    qx: 0.0
-    qy: 0.7071067811865476
-    qz: 0.0
-    qw: 0.7071067811865476
+    qx: 0.03562881959246257
+    qy: 0.8479454861242605
+    qz: 0.21489518866060578
+    qw: 0.4832588309244457
 
   right:
     x: 0.0
     y: 0.0
     z: 0.0
-    qx: 0.0
-    qy: -0.7071067811865476
-    qz: 0.0
-    qw: 0.7071067811865476
+    qx: 0.20263253122344868
+    qy: -0.5027602010764445
+    qz: -0.038870031605271665
+    qw: 0.839441098676111
