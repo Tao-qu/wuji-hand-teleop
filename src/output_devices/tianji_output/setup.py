@@ -26,6 +26,7 @@ setup(
     install_requires=[
         'setuptools',
         'numpy>=1.24.0',
+        'PyYAML',
     ],
     zip_safe=False,  # Must be False because of shared libraries
     maintainer='wuji',

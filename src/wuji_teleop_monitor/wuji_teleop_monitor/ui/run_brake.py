@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Brake Control — direct-SDK arm recovery tool.
 
-Talks to the Tianji controller cabinet (default 192.168.1.190) directly via
+Talks to the configured Tianji controller cabinet directly via
 the Tianji SDK; no ROS2 services, no controller process required. Use it
 when teleop is OFF and you need to manually release / hold the brakes,
 clear servo errors, or read state codes.
@@ -41,7 +41,6 @@ from .theme import (
 )
 
 _LOCK_FILE = "/tmp/wuji_teleop_brake.lock"
-_DEFAULT_ROBOT_IP = "192.168.1.190"
 
 # Logo lives one level up from the ui/ subpackage (same as monitor).
 _LOGO_PATH = Path(__file__).resolve().parent.parent / "wuji_icon.png"
@@ -81,6 +80,16 @@ class BrakeControlUI(QMainWindow):
         self._op_result_signal.connect(self._append_log)
 
         self._init_ui()
+        self._default_robot_ip = ""
+        try:
+            from tianji_output.configuration import load_arm_config
+
+            self._default_robot_ip = str(load_arm_config()["driver"]["robot_ip"])
+            self._ip_edit.setText(self._default_robot_ip)
+        except Exception as exc:
+            self._conn_status_label.setText(f"Status: configuration unavailable ({exc})")
+            self._log_signal.emit(f"Could not load the configured robot IP: {exc}")
+        self._joint_panel.refresh_home_reference()
         self._set_brake_buttons_enabled(False)
 
     # -------------------- Logo --------------------
@@ -162,7 +171,7 @@ class BrakeControlUI(QMainWindow):
         ip_lbl.setStyleSheet("color: #ccc;")
         ip_row.addWidget(ip_lbl)
 
-        self._ip_edit = QLineEdit(_DEFAULT_ROBOT_IP)
+        self._ip_edit = QLineEdit()
         self._ip_edit.setFixedWidth(160)
         self._ip_edit.setStyleSheet(
             "QLineEdit { background-color: #1e1e1e; color: #ddd;"
@@ -341,10 +350,11 @@ class BrakeControlUI(QMainWindow):
         self._read_status_btn.setEnabled(enabled)
 
     def _on_connect_clicked(self):
-        robot_ip = self._ip_edit.text().strip() or _DEFAULT_ROBOT_IP
+        robot_ip = self._ip_edit.text().strip() or self._default_robot_ip
+        target = robot_ip or "the configured controller"
         reply = QMessageBox.warning(
             self, "Confirm direct SDK connect",
-            f"Open a direct TCP session to {robot_ip}?\n\n"
+            f"Open a direct TCP session to {target}?\n\n"
             f"Marvin allows only one client at a time. If a teleop\n"
             f"controller is currently using the arm, this Connect will\n"
             f"fail with a 'port in use' error — stop teleop first.\n",
@@ -355,19 +365,19 @@ class BrakeControlUI(QMainWindow):
 
         self._connect_btn.setEnabled(False)
         self._ip_edit.setEnabled(False)
-        self._log_signal.emit(f"Connecting to {robot_ip}...")
-        self._conn_status_label.setText(f"Status: connecting to {robot_ip}...")
+        self._log_signal.emit(f"Connecting to {target}...")
+        self._conn_status_label.setText(f"Status: connecting to {target}...")
         self._conn_status_label.setStyleSheet(
             "color: #F57C00; font-family: 'Courier New'; font-size: 11px;")
 
         def _worker():
             try:
                 from tianji_output import TianjiChestDriver
-                driver = TianjiChestDriver(robot_ip=robot_ip)
+                driver = TianjiChestDriver(robot_ip=robot_ip or None)
                 with self._sdk_lock:
                     self._driver = driver
                     self._connected = True
-                self._conn_signal.emit(True, f"connected to {robot_ip}")
+                self._conn_signal.emit(True, f"connected to {target}")
             except Exception as e:
                 self._conn_signal.emit(False, f"connect failed: {e}")
 

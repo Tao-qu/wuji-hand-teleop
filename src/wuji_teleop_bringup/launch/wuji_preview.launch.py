@@ -9,7 +9,7 @@ from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from wuji_teleop_bringup.launch_utils import resolve_config_path
+from tianji_output.configuration import arm_config_path
 
 
 TF_REMAPS = [("/tf", "/preview/tf"), ("/tf_static", "/preview/tf_static")]
@@ -22,15 +22,14 @@ def _nodes(context):
         manus_share = Path(get_package_share_directory("manus_ros2"))
         profiles = {f"{side}_calibration_file": str(manus_share / "calibration" / f"tpx{side.title()}MetaglovePro.mcal")
                     for side in ("left", "right")}
-        config_path = LaunchConfiguration("tracker_config").perform(context)
-        config_path = config_path or resolve_config_path("openvr_input", "openvr_input.yaml")
+        config_path = arm_config_path(LaunchConfiguration("arm_config").perform(context))
         nodes += [
             Node(package="manus_ros2", executable="manus_data_publisher", name="preview_manus",
                  output="log", parameters=[profiles],
                  remappings=[("/manus_glove_0", "/preview/manus_glove_0"),
                              ("/manus_glove_1", "/preview/manus_glove_1")]),
             Node(package="openvr_input", executable="openvr_input", name="preview_openvr",
-                 output="screen", arguments=["-c", config_path], remappings=TF_REMAPS),
+                 output="screen", arguments=["-c", str(config_path)], remappings=TF_REMAPS),
         ]
     preview = Node(package="wuji_teleop_bringup", executable="hand2_preview", output="screen")
     nodes.append(preview)
@@ -66,6 +65,6 @@ def generate_launch_description():
         DeclareLaunchArgument("start_inputs", default_value="true", choices=["true", "false"],
                               description="Start input readers; false permits a no-hardware graph check"),
         DeclareLaunchArgument("enable_rviz", default_value="true", choices=["true", "false"]),
-        DeclareLaunchArgument("tracker_config", default_value="", description="Five-Tracker YAML; no actuator config"),
+        DeclareLaunchArgument("arm_config", default_value="", description="Arm YAML selecting Tracker input and calibration"),
         OpaqueFunction(function=_nodes),
     ])

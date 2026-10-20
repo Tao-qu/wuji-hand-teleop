@@ -25,8 +25,6 @@ HAND_JOINTS = ['S1', 'S2', 'S3', 'S4']
 
 from .hand2_support import JOINT_LABELS
 
-from .arm_constants import INIT_LEFT, INIT_RIGHT
-
 
 class JointDisplayPanel(QGroupBox):
     """Joint-angle display panel — embeddable in any QMainWindow."""
@@ -65,6 +63,7 @@ class JointDisplayPanel(QGroupBox):
             'right_hand': deque(maxlen=400),
         }
         self._hz_labels = {}
+        self._home_labels = {}
 
         self._build_ui()
         self._on_hand_joint_changed(self._hand_joint_idx)
@@ -87,7 +86,29 @@ class JointDisplayPanel(QGroupBox):
                 visible(layout.itemAt(index), arms)
         for index in (3, 4, 5):
             visible(layout.itemAt(index), hands)
+        if arms:
+            self.refresh_home_reference()
         self.setTitle("Joint Angles")
+
+    def refresh_home_reference(self):
+        """Load reference rows only when the arm display is needed."""
+        try:
+            from tianji_output.configuration import load_arm_config
+
+            config = load_arm_config()
+            values = {
+                side: [f"{value:.0f}" for value in config[f"{side}_arm"]["home_joints"]]
+                for side in ("left", "right")
+            }
+            tooltip = "Configured arm Home (degrees)"
+        except Exception as exc:
+            values = {}
+            tooltip = f"Home reference unavailable: {exc}"
+        for side, labels in self._home_labels.items():
+            reference = values.get(side, [])
+            for index, label in enumerate(labels):
+                label.setText(reference[index] if index < len(reference) else "--")
+                label.setToolTip(tooltip)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -146,20 +167,23 @@ class JointDisplayPanel(QGroupBox):
         # Reference-value rows
         ref_style = "color: #666; font-size: 9px;"
         val_style = "color: #777;"
-        for label_text, init_vals in [("Left ref", INIT_LEFT), ("Right ref", INIT_RIGHT)]:
+        for side, label_text in (("left", "Left ref"), ("right", "Right ref")):
             row = QHBoxLayout()
             row.setSpacing(4)
             lbl = QLabel(label_text)
             lbl.setFixedWidth(lbl_width)
             lbl.setStyleSheet(ref_style)
             row.addWidget(lbl)
-            for v in init_vals:
-                vlbl = QLabel(f"{v:.0f}")
+            labels = []
+            for _ in range(7):
+                vlbl = QLabel("--")
                 vlbl.setFixedWidth(val_width)
                 vlbl.setAlignment(Qt.AlignCenter)
                 vlbl.setFont(QFont("Courier", 9))
                 vlbl.setStyleSheet(val_style)
                 row.addWidget(vlbl)
+                labels.append(vlbl)
+            self._home_labels[side] = labels
             row.addStretch()
             layout.addLayout(row)
 

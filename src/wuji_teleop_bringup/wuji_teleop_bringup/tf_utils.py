@@ -1,28 +1,16 @@
-"""Shared TF utilities for launch files."""
+"""Publish the fixed transforms from the selected Tracker calibration."""
 
-from pathlib import Path
-import yaml
-from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 
 
-def load_tf_config() -> dict:
-    """Load static transforms config."""
-    share_dir = Path(get_package_share_directory("wuji_teleop_bringup"))
-    with open(share_dir / "config" / "static_transforms.yaml") as f:
-        return yaml.safe_load(f)
-
-
-def create_chest_tf_nodes(config: dict = None, sides: list = None) -> list:
+def create_chest_tf_nodes(config: dict, sides: list = None) -> list:
     """
     Create chest mount TF nodes.
 
     Args:
-        config: Config dict, loads from yaml if None
+        config: Selected Tracker calibration
         sides: ["left", "right"] or subset, defaults to both
     """
-    if config is None:
-        config = load_tf_config()
     if sides is None:
         sides = ["left", "right"]
 
@@ -68,10 +56,8 @@ def create_chest_tf_nodes(config: dict = None, sides: list = None) -> list:
     return nodes
 
 
-def create_tianji_tf_nodes(config: dict = None, sides: list = None) -> list:
+def create_tianji_tf_nodes(config: dict, sides: list = None) -> list:
     """Create wrist to tianji TF nodes."""
-    if config is None:
-        config = load_tf_config()
     if sides is None:
         sides = ["left", "right"]
 

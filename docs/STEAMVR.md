@@ -41,29 +41,49 @@ finally:
 PYCODE
 ```
 
-Enter five distinct hardware serial numbers in `src/input_devices/openvr_input/config/openvr_input.yaml`:
+Enter five distinct hardware serial numbers under `openvr` in `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`:
 
 ```yaml
-tracker_serials:
-  chest: LHR-CHEST
-  left_wrist: LHR-LEFT-WRIST
-  right_wrist: LHR-RIGHT-WRIST
-  left_arm: LHR-LEFT-ARM
-  right_arm: LHR-RIGHT-ARM
+openvr:
+  calibration_file: tracker-neutral.yaml
+  tracker_serials:
+    chest: LHR-CHEST
+    left_wrist: LHR-LEFT-WRIST
+    right_wrist: LHR-RIGHT-WRIST
+    left_arm: LHR-LEFT-ARM
+    right_arm: LHR-RIGHT-ARM
+  publish_rate_hz: 120.0
+  publish_tf: true
+  parent_frame: world
 ```
 
-These values are placeholders. `wrist_offset` specifies the offset from the Tracker mounting point to the wrist and must match the actual installation. Chest and end-effector transforms are defined in `static_transforms.yaml`.
+The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `wrist_offset`, `chest_mount`, `wrist_to_tianji`, and `upper_arm_rotations`. A filename resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly. `wrist_offset` is the Tracker-to-wrist offset in the raw Tracker frame, in metres, and must match the mounting.
+
+## Neutral-pose calibration
+
+Set the arm Home joint positions, Tracker serials, and wrist offset before calibration. Keep SteamVR running and stop other OpenVR input processes. The calibration CLI uses the default project `tianji_chest.yaml`, reads Tracker poses and local kinematics, and does not connect to the cabinet.
+
+```bash
+source tools/env.sh
+ros2 run openvr_input tracker_calibrate --inspect
+ros2 run openvr_input tracker_calibrate --calibrate \
+  --output "$PWD/src/input_devices/openvr_input/calibration/tracker-my-neutral.yaml"
+```
+
+Choose a new output filename in an existing directory. Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. Keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
+
+After saving, set `openvr.calibration_file` in `tianji_chest.yaml` to the exported file's absolute path and restart teleoperation. Profiles installed in the `openvr_input` package's `calibration` directory can be selected by filename. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing mounting or the reference Home pose.
 
 ## Verification and operation
 
 Start only the input node first, without connecting to the arms. Run the TF inspection command in another terminal with the environment loaded:
 
 ```bash
-ros2 run openvr_input openvr_input
+ros2 launch openvr_input openvr_input.launch.py
 ros2 run tf2_ros tf2_echo chest left_wrist
 ```
 
-Confirm that all five TF frames follow the corresponding body segments correctly. Stop the standalone input process before starting the arm pipeline:
+The standalone launch reads the same arm configuration and calibration profile as teleoperation. To select another arm configuration, add `arm_config:=/absolute/path/to/tianji_chest.yaml`. Confirm that all five TF frames follow the corresponding body segments correctly. Stop the standalone input process before starting the arm pipeline:
 
 ```bash
 ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false enable_rviz:=true

@@ -22,12 +22,11 @@ from std_msgs.msg import Float64MultiArray, Int8
 from std_srvs.srv import SetBool, Trigger
 
 from tianji_output import TianjiChestDriver
+from tianji_output.configuration import load_arm_config
 from .common import (
     ArmState,
     ROS2LoggerAdapter,
     get_default_qos,
-    load_yaml_config,
-    get_package_config_path,
     run_ros_node,
 )
 
@@ -57,22 +56,28 @@ LIFECYCLE_SDK_ERROR = 5
 class TianjiArmControllerNode(Node):
     """Tianji arm controller node."""
 
-    def __init__(self, robot_ip: str = '192.168.1.190'):
+    def __init__(self, robot_ip: Optional[str] = None, *, config=None):
         super().__init__("tianji_arm_controller")
+        config = load_arm_config() if config is None else config
+        settings = config['controller']
+        if robot_ip is None:
+            robot_ip = config['driver']['robot_ip']
 
         # Auto-enable uses a one-shot timer after node construction.
         self.declare_parameter('auto_enable', True)
         self.declare_parameter('startup_wait_sec', 3.0)
         # Independent rates for TF -> IK control and joint-state publication.
-        self.declare_parameter('control_rate', 120.0)
-        self.declare_parameter('state_publish_rate', 500.0)
+        self.declare_parameter('control_rate', float(settings['control_rate']))
+        self.declare_parameter('state_publish_rate', float(settings['state_publish_rate']))
+        self.declare_parameter('home_duration_sec', float(settings['home_duration_sec']))
         # Hold the measured pose, then blend to live IK over handoff_ramp_sec.
-        self.declare_parameter('handoff_hold_sec', 0.5)
-        self.declare_parameter('handoff_ramp_sec', 1.0)
+        self.declare_parameter('handoff_hold_sec', float(settings['handoff_hold_sec']))
+        self.declare_parameter('handoff_ramp_sec', float(settings['handoff_ramp_sec']))
         auto_enable = bool(self.get_parameter('auto_enable').value)
         self._startup_wait_sec = float(self.get_parameter('startup_wait_sec').value)
         self._control_rate_hz = float(self.get_parameter('control_rate').value)
         self._state_publish_rate_hz = float(self.get_parameter('state_publish_rate').value)
+        self._home_duration_sec = float(self.get_parameter('home_duration_sec').value)
         self._handoff_hold_sec = max(0.0, float(self.get_parameter('handoff_hold_sec').value))
         self._handoff_ramp_sec = max(0.0, float(self.get_parameter('handoff_ramp_sec').value))
         if self._control_rate_hz <= 0.0:
@@ -89,7 +94,8 @@ class TianjiArmControllerNode(Node):
 
         # Initialize the controller.
         self.get_logger().info(f"Connecting to robot {robot_ip}...")
-        self.controller = TianjiChestDriver(robot_ip=robot_ip, logger=self._logger_adapter)
+        self.controller = TianjiChestDriver(
+            robot_ip=robot_ip, logger=self._logger_adapter, config=config)
 
         # STANDBY / ACTIVE state management.
         self._arm_enabled = False
@@ -216,10 +222,10 @@ class TianjiArmControllerNode(Node):
             # Position-mode initialization precedes the impedance handoff.
             self.controller.set_position_mode(velRatio=100, AccRatio=100)
             self.get_logger().info(
-                f"Moving arms Home over 8 seconds; following starts after "
+                f"Moving arms Home over {self._home_duration_sec:g} seconds; following starts after "
                 f"{self._startup_wait_sec:g} seconds of preparation")
             result = self.controller.move_to_init(
-                wait=True, timeout=self._startup_wait_sec, duration=8.0)
+                wait=True, timeout=self._startup_wait_sec, duration=self._home_duration_sec)
             if result is False:
                 self.get_logger().error("move_to_init failed or timed out")
                 raise RuntimeError("move_to_init failed")
@@ -675,11 +681,10 @@ def main(argv: Optional[list[str]] = None):
     args = _parse_args(cli_argv)
 
     # Load config.
-    config_path = args.config or get_package_config_path("tianji_output", "tianji_chest.yaml")
-    config = load_yaml_config(config_path)
+    config = load_arm_config(args.config)
 
     run_ros_node(
-        lambda: TianjiArmControllerNode(robot_ip=config.get("robot_ip", "192.168.1.190")),
+        lambda: TianjiArmControllerNode(config=config),
         args=raw_argv)
 
 

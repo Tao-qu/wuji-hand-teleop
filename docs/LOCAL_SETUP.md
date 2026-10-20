@@ -67,14 +67,40 @@ The bundled Linux kinematics library uses a 472-byte IK parameter structure, inc
 
 ## 4. Configuration and build
 
-Fill in local `hand2.yaml`, `openvr_input.yaml`, and `tianji_chest.yaml` files generated from their templates. Prepare MANUS calibration files for the current operator before running input. The hand configuration contains:
+Fill in the two local files generated from templates: `src/output_devices/wujihand_output/config/hand2.yaml` and `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`. Prepare MANUS calibration files for the current operator before running input. The hand configuration contains:
 
 - `left_hand` and `right_hand`: unique `serial_number` and ROS `name`.
 - `driver`: command, feedback publication, and diagnostic rates; MIT gains `kp`/`kd`; and `auto_enable` (default `true`).
 - `controller`: MANUS `control_rate` and `flip_y: false`. The publisher explicitly requests right-handed coordinates, so the controller preserves XYZ. Set `flip_y: true` only for a separately validated input convention; it reverses chirality and is not a wrist rotation.
 - `manus`: optional absolute `left_calibration_file` and `right_calibration_file` paths. Empty paths select the bundled TPX profiles.
 
-The configuration tool manages only the three project templates and never replaces an existing local file. `python3 tools/configure.py --check` reports missing local files without writing. Generate local configuration before building, so the files are installed into ROS share directories:
+The arm configuration contains:
+
+- `left_arm.home_joints` and `right_arm.home_joints`: seven joint positions per arm, in degrees.
+- `driver.robot_ip`: cabinet SDK endpoint. `driver.kinematics_model`: the Tianji kinematics configuration filename in the `tianji_output` package's `config` directory, or an absolute path.
+- `driver.tool_dynamics`: payload source and optional per-arm parameters, described below.
+- `controller.control_rate` and `controller.state_publish_rate`: command and feedback publication rates in Hz. `home_duration_sec` controls the Home trajectory duration; `handoff_hold_sec` and `handoff_ramp_sec` control the measured-pose hold and blend into Tracker following, all in seconds.
+- `openvr.tracker_serials`: `chest`, `left_wrist`, `right_wrist`, `left_arm`, and `right_arm` serial numbers. `publish_rate_hz`, `publish_tf`, and `parent_frame` control Tracker publication.
+- `openvr.calibration_file`: the selected Tracker profile. A filename resolves in the `openvr_input` package's `calibration` directory; an absolute path is read directly.
+
+Keep `driver.tool_dynamics.source: controller` to reuse the cabinet's payload values. To supply measured payloads, set `source: configured` and provide separate `left` and `right` arrays of ten values:
+
+```text
+[mass_kg, com_x_mm, com_y_mm, com_z_mm, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
+```
+
+The six inertia entries use kg·mm². Include the complete hand, adapter, and cable assembly. Optional `driver.tool_transforms.left` and `.right` are rigid 4×4 flange-to-target matrices, with translation in millimetres; omitting them selects identity transforms. Apply each geometric offset once, either here or in the target TF chain.
+
+The selected Tracker profile has four top-level fields:
+
+- `wrist_offset`: `[x, y, z]` in metres, expressed in the raw wrist Tracker frame.
+- `chest_mount`: shared chest-frame translation and per-side `roll`, `pitch`, `yaw`, `local_x`, `local_y`, `local_z`. Translations are in metres and Euler angles in radians.
+- `wrist_to_tianji`: per-side translation `x`, `y`, `z` in metres and quaternion `qx`, `qy`, `qz`, `qw`.
+- `upper_arm_rotations`: `left_arm` and `right_arm` 3×3 rotations. Columns are calibrated axes in the raw Tracker frame; the Y column supplies the arm reference direction to IK.
+
+The bundled profile is `src/input_devices/openvr_input/calibration/tracker-neutral.yaml`. Runtime loads the selected profile directly. See [neutral-pose calibration](STEAMVR.md#neutral-pose-calibration) to export a new one.
+
+The configuration tool manages only the hand and arm templates and never replaces an existing local file. `python3 tools/configure.py --check` reports missing local files without writing. Generate local configuration before building, so the files are installed into ROS share directories:
 
 ```bash
 source tools/env.sh
@@ -99,9 +125,9 @@ ros2 launch wuji_teleop_bringup wuji_teleop.launch.py
 
 Use `enable_arm:=false` for hands only, or `enable_hand:=false` for arms only. `hand_side:=left` or `hand_side:=right` selects one hand. To control enabling through the GUI or ROS services instead of startup, pass `hand_auto_enable:=false` and/or `arm_auto_enable:=false`. The `hand_auto_enable` launch argument overrides the hand YAML's `auto_enable` value.
 
-The hand bridge sets MIT gains and sends the latest 20-joint target through the official SDK. The SDK and hand firmware manage motor control; the project does not configure a current limit or add command timeout, ramp, or joint-limit interlocks. The GUI displays feedback and diagnostics and provides Enable/Disable buttons. The hand driver also exposes SDK emergency-stop and clear-fault operations as ROS services. See the [README](../README.md) for launch options and services.
+Teleoperation, Home, Preview, and the standalone OpenVR launch accept `arm_config:=/absolute/path/to/tianji_chest.yaml`. Leaving it empty selects the local arm configuration installed in the `tianji_output` package.
 
-Tianji tool dynamics default to the values already stored in the cabinet. They have not been recalibrated by this migration. Measure the complete assemblies before selecting `tool_dynamics.source: configured`. Optional `tool_transforms.left/right` are rigid flange-to-target 4×4 matrices with translation in millimetres; do not duplicate the same offset in TF.
+The hand bridge sets MIT gains and sends the latest 20-joint target through the official SDK. The SDK and hand firmware manage motor control; the project does not configure a current limit or add command timeout, ramp, or joint-limit interlocks. The GUI displays feedback and diagnostics and provides Enable/Disable buttons. The hand driver also exposes SDK emergency-stop and clear-fault operations as ROS services. See the [README](../README.md) for launch options and services.
 
 ## 6. Troubleshooting
 
@@ -122,6 +148,6 @@ The GUI's separate brake tool opens a direct cabinet connection. Stop arm teleop
 
 ## 7. Arm initialization and Stop
 
-The default initial targets are left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Set `init_joints` in `tianji_chest.yaml` to change them.
+The default Home targets are left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Set `left_arm.home_joints` and `right_arm.home_joints` in `tianji_chest.yaml` to change them.
 
-Normal initialization enters position mode, executes the initial trajectory with an 8-second duration and a 15-second settling wait, then requests joint-impedance mode for Tracker control. The GUI's Disable operation or `/tianji_arm_controller/set_enabled` with `data: false` requests standby while keeping the connection. Initialization and enable/disable services run under the controller's enable lock; a stop request does not interrupt an initialization already holding that lock.
+Normal initialization enters position mode, executes the Home trajectory using `controller.home_duration_sec` (8 seconds by default), then requests joint-impedance mode for Tracker control. The measured-pose hold and target blend use `controller.handoff_hold_sec` and `controller.handoff_ramp_sec`. The GUI's Disable operation or `/tianji_arm_controller/set_enabled` with `data: false` requests standby while keeping the connection. Initialization and enable/disable services run under the controller's enable lock; a stop request does not interrupt an initialization already holding that lock.

@@ -16,9 +16,8 @@ except ImportError:
     from ._internal.structure_data import DCSS
 import time
 import logging
-import os
-import yaml
-from ament_index_python.packages import get_package_share_directory
+from pathlib import Path
+from .configuration import kinematics_path, load_arm_config
 from .tool_parameters import apply_tool_parameters
 
 
@@ -29,17 +28,15 @@ class TianjiArmController:
     Supports both Cartesian space control and joint space control.
     """
 
-    def __init__(self, robot_ip='192.168.1.190', config_path=None, logger=None):
+    def __init__(self, robot_ip=None, config_path=None, logger=None, *, config=None):
         """
         Initialize Tianji arm controller (initializes both left and right arms)
 
         Args:
-            robot_ip: Robot IP address
-            config_path: Kinematics configuration file path
-                - None: Use default 'ccs_m6.MvKDCfg'(auto-searched from ROS2 package)
-                - Relative path: search from ROS2 package config directory
-                - Absolute path: use this path directly
+            robot_ip: Optional override for driver.robot_ip.
+            config_path: Optional kinematics model path override.
             logger: External logger (optional, for integrating ROS2 logging system)
+            config: Complete arm configuration; otherwise load the default file.
         """
         # Logging: prefer externally provided logger
         if logger is not None:
@@ -52,13 +49,16 @@ class TianjiArmController:
                 handler.setFormatter(logging.Formatter('[%(name)s] %(message)s'))
                 self.logger.addHandler(handler)
 
-        # Parse configuration file path
-        if config_path is None:
-            config_filename = 'ccs_m6.MvKDCfg'
-            package_share = get_package_share_directory('tianji_output')
-            config_path = os.path.join(package_share, 'config', config_filename)
-
-        if not os.path.exists(config_path):
+        cfg = load_arm_config() if config is None else config
+        self._tool_config = cfg['driver']
+        self._init_joints_left = list(cfg['left_arm']['home_joints'])
+        self._init_joints_right = list(cfg['right_arm']['home_joints'])
+        if robot_ip is None:
+            robot_ip = cfg['driver']['robot_ip']
+        model_path = (Path(config_path).expanduser().resolve()
+                      if config_path is not None else kinematics_path(cfg))
+        config_path = str(model_path)
+        if not model_path.exists():
             raise FileNotFoundError(f"Configuration file does not exist: {config_path}")
 
         self.logger.debug(f"Loading configuration file: {config_path}")
@@ -128,10 +128,7 @@ class TianjiArmController:
 
     def _set_tool_params(self):
         """Apply the configured cabinet tool-dynamics source."""
-        share = get_package_share_directory('tianji_output')
-        with open(os.path.join(share, 'config', 'tianji_chest.yaml')) as stream:
-            config = yaml.safe_load(stream)
-        self._active_tool_dynamics = apply_tool_parameters(self.robot, config, self.logger)
+        self._active_tool_dynamics = apply_tool_parameters(self.robot, self._tool_config, self.logger)
         time.sleep(0.3)
 
     def _verify_connection(self):
@@ -492,8 +489,8 @@ class TianjiArmController:
         Returns:
             bool: Whether successful
         """
-        INIT_JOINTS_LEFT = [56.9, -63.0, -46.8, -87.8, 143.2, -4.1, -45.6]
-        INIT_JOINTS_RIGHT = [-50.9, -70.5, 42.6, -80.3, -140.1, -5.5, 38.9]
+        INIT_JOINTS_LEFT = list(self._init_joints_left)
+        INIT_JOINTS_RIGHT = list(self._init_joints_right)
 
         self.logger.debug(f"Moving both arms to initial pose({duration}s compliant trajectory)...")
 

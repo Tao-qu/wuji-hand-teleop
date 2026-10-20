@@ -2,15 +2,16 @@
 
 ## Getting Started
 
-Before wearing the Trackers, pair them with SteamVR and confirm their serial numbers. After assigning each Tracker to a body segment, write the serial mapping into the configuration file [`openvr_input.yaml`](../src/input_devices/openvr_input/config/openvr_input.yaml.template) in the wuji-hand-teleop project.
+Before wearing the Trackers, pair them with SteamVR and confirm their serial numbers. After assigning each Tracker to a body segment, write the serial mapping under `openvr.tracker_serials` in `tianji_chest.yaml`. See the [arm configuration template](../src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml.template).
 
 ```yaml
-tracker_serials:
-  chest: "LHR-xxxxxxx1"         # Chest
-  right_wrist: "LHR-xxxxxxx2"   # Right wrist
-  left_wrist: "LHR-xxxxxxx3"    # Left wrist
-  left_arm: "LHR-xxxxxxx4"      # Left upper arm
-  right_arm: "LHR-xxxxxxx5"     # Right upper arm
+openvr:
+  tracker_serials:
+    chest: "LHR-xxxxxxx1"         # Chest
+    right_wrist: "LHR-xxxxxxx2"   # Right wrist
+    left_wrist: "LHR-xxxxxxx3"    # Left wrist
+    left_arm: "LHR-xxxxxxx4"      # Left upper arm
+    right_arm: "LHR-xxxxxxx5"     # Right upper arm
 ```
 
 > [!NOTE]
@@ -26,6 +27,8 @@ Use the **USB-C port** on each Tracker as the orientation reference:
 The complete wearing setup is shown below.
 
 ![Tracker wearing setup](images/tracker-wearing-combined.jpg)
+
+After securing the Trackers, [capture a neutral-pose profile](STEAMVR.md#neutral-pose-calibration) for the configured arm Home. Select that file with `openvr.calibration_file` in `tianji_chest.yaml` and restart teleoperation. Recalibrate when the mounting changes.
 
 > [!NOTE]
 >

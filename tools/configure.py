@@ -7,13 +7,12 @@ import shutil
 
 CONFIG_TEMPLATES = (
     "src/output_devices/wujihand_output/config/hand2.yaml.template",
-    "src/input_devices/openvr_input/config/openvr_input.yaml.template",
     "src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml.template",
 )
 
 
 def configure(root, *, check_only=False):
-    """Operate only on this project's three templates, excluding fetched sources."""
+    """Create missing hand and arm configurations, excluding fetched sources."""
     root = Path(root)
     created = []
     for relative in CONFIG_TEMPLATES:

@@ -1,7 +1,6 @@
 """Home-reference kinematics and mirror-constrained Tracker calibration."""
 
 from copy import deepcopy
-from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -18,7 +17,7 @@ def home_reference(context):
     from tianji_output._internal.fx_kine import Marvin_Kine
     from tianji_output.tool_parameters import tool_transform
 
-    robot_config = context["robot_config"]
+    arm_config = context["arm_config"]
     model_path = str(context["kinematics_path"])
     kine = Marvin_Kine()
     model = kine.load_config(config_path=model_path)
@@ -26,21 +25,12 @@ def home_reference(context):
         raise RuntimeError(f"Cannot load kinematics model: {model_path}")
 
     reference = {
-        "kinematics_model": Path(model_path).name,
-        "init_joints": {},
         "home_tcp": {},
         "upper_arm_directions": {},
-        "tool_transforms": {},
-        "units": {
-            "init_joints": "degrees",
-            "home_tcp_translation": "metres",
-            "tool_transforms_translation": "millimetres",
-            "upper_arm_directions": "unit vectors",
-        },
     }
     for index, side in enumerate(SIDES):
-        joints = [float(value) for value in robot_config["init_joints"][side]]
-        tool = tool_transform(robot_config, side)
+        joints = [float(value) for value in arm_config[f"{side}_arm"]["home_joints"]]
+        tool = tool_transform(arm_config["driver"], side)
         if not kine.initial_kine(
             robot_serial=index,
             robot_type=model["TYPE"][index],
@@ -64,10 +54,8 @@ def home_reference(context):
             np.sin(q2) * np.sin(q1),
             -np.cos(q2),
         ]).tolist()
-        reference["init_joints"][side] = joints
         reference["home_tcp"][side] = tcp.tolist()
         reference["upper_arm_directions"][side] = direction
-        reference["tool_transforms"][side] = tool
     return reference
 
 
@@ -94,7 +82,7 @@ def _rotation_from_y(direction):
 
 
 def fit_calibration(context, samples):
-    """Fit synchronized raw world poses; return fields, residuals and reference.
+    """Fit synchronized raw world poses; return fields and console residuals.
 
     ``samples`` maps chest, left/right_wrist and left/right_arm to (N, 4, 4)
     arrays. Capture owns device validity and synchronization. This function
@@ -103,10 +91,9 @@ def fit_calibration(context, samples):
     from .openvr_tracker_wrapper import OpenVRTrackerWrapper
 
     reference = home_reference(context)
-    tracker_config = context["tracker_config"]
-    static_config = context["static_config"]
-    chest_settings = static_config["chest_mount"]
-    wrist_settings = static_config["wrist_to_tianji"]
+    profile = context["profile"]
+    chest_settings = profile["chest_mount"]
+    wrist_settings = profile["wrist_to_tianji"]
     raw_chest = np.asarray(samples["chest"], dtype=float)
     count = len(raw_chest)
     if count == 0:
@@ -115,7 +102,7 @@ def fit_calibration(context, samples):
     chest = raw_chest @ OpenVRTrackerWrapper._CHEST_CORRECTION
     chest_inverse_rotation = chest[:, :3, :3].transpose(0, 2, 1)
     shared = np.array([chest_settings["shared"][axis] for axis in ("x", "y", "z")])
-    wrist_offset = np.asarray(tracker_config.get("wrist_offset") or [0, 0, 0], dtype=float)
+    wrist_offset = np.asarray(profile["wrist_offset"], dtype=float)
     data = {}
 
     for side in SIDES:
@@ -173,9 +160,10 @@ def fit_calibration(context, samples):
     }
     upper = {"left": upper_left, "right": TRACKER_MIRROR @ upper_left @ TRACKER_MIRROR}
     calibration = {
+        "wrist_offset": wrist_offset.tolist(),
         "chest_mount": deepcopy(chest_settings),
         "wrist_to_tianji": deepcopy(wrist_settings),
-        "upper_arm_rotations": deepcopy(tracker_config.get("upper_arm_rotations") or {}),
+        "upper_arm_rotations": deepcopy(profile["upper_arm_rotations"]),
     }
     fit = {"sample_count": count}
 
@@ -213,4 +201,4 @@ def fit_calibration(context, samples):
             "upper_arm_rms_deg": float(np.sqrt(np.mean(upper_angle ** 2))),
         }
 
-    return {"calibration": calibration, "fit": fit, "reference": reference}
+    return {"calibration": calibration, "fit": fit}

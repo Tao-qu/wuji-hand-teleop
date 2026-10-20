@@ -21,6 +21,7 @@ class HomePositionNode(Node):
         super().__init__("home_position")
         self.declare_parameter("mode", "both")
         self.declare_parameter("hand_config", "")
+        self.declare_parameter("arm_config", "")
         mode = str(self.get_parameter("mode").value)
         if mode not in ("both", "arms", "hands"):
             raise ValueError("mode must be both, arms, or hands")
@@ -53,12 +54,15 @@ class HomePositionNode(Node):
 
         self._arm_state_pubs = {}
         if self._use_arms:
-            self._arm_config = load_yaml_config(
-                resolve_config_path("tianji_output", "tianji_chest.yaml"))
+            from tianji_output.configuration import load_arm_config
+
+            self._arm_config = load_arm_config(
+                str(self.get_parameter("arm_config").value) or None)
+            state_rate = float(self._arm_config["controller"]["state_publish_rate"])
             for side in ("left", "right"):
                 self._arm_state_pubs[side] = self.create_publisher(
                     JointState, f"/{side}_arm/joint_states", get_default_qos())
-            self._timers.append(self.create_timer(1.0 / 500.0, self._publish_arm_feedback))
+            self._timers.append(self.create_timer(1.0 / state_rate, self._publish_arm_feedback))
 
         self._timers.append(self.create_timer(1.0 / command_rate, self._publish_targets))
         self._timers.append(self.create_timer(0.2, self._publish_status))
@@ -76,10 +80,12 @@ class HomePositionNode(Node):
             from tianji_output import TianjiChestDriver
 
             self._arm_controller = TianjiChestDriver(
-                robot_ip=self._arm_config.get("robot_ip", "192.168.1.190"),
+                config=self._arm_config,
                 logger=ROS2LoggerAdapter(self.get_logger()))
             self._arm_controller.set_position_mode(velRatio=100, AccRatio=100)
-            result = self._arm_controller.move_to_init(wait=True, timeout=15, duration=8.0)
+            result = self._arm_controller.move_to_init(
+                wait=True, timeout=15,
+                duration=float(self._arm_config["controller"]["home_duration_sec"]))
             if result is False:
                 self._set_error("Arm Home operation reported failure")
                 return

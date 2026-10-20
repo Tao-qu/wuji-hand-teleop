@@ -5,11 +5,13 @@ import math
 from pathlib import Path
 
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedSeq
 
 
 SIDES = ("left", "right")
 CHEST_KEYS = ("roll", "pitch", "yaw", "local_x", "local_y", "local_z")
 WRIST_KEYS = ("x", "y", "z", "qx", "qy", "qz", "qw")
+PROFILE_KEYS = ("wrist_offset", "chest_mount", "wrist_to_tianji", "upper_arm_rotations")
 
 
 def read_config(path):
@@ -22,18 +24,30 @@ def read_config(path):
     return data
 
 
-def default_config(package, filename):
-    from ament_index_python.packages import get_package_share_directory
+def calibration_path(arm_config):
+    """Resolve a bundled calibration filename or an absolute profile path."""
+    path = Path(arm_config["openvr"]["calibration_file"]).expanduser()
+    if not path.is_absolute():
+        if path.parent != Path(".") or not path.name:
+            raise ValueError("calibration_file must be a filename or an absolute path")
+        from ament_index_python.packages import get_package_share_directory
 
-    return Path(get_package_share_directory(package)) / "config" / filename
+        path = Path(get_package_share_directory("openvr_input")) / "calibration" / path
+    return path.resolve(strict=True)
 
 
-def load_context(tracker_path, static_path, robot_path, kinematics_path):
+def load_selected_profile(arm_config):
+    """Read the calibration selected by the arm configuration."""
+    return read_config(calibration_path(arm_config))
+
+
+def load_context(arm_config):
+    from tianji_output.configuration import kinematics_path
+
     return {
-        "tracker_config": read_config(tracker_path),
-        "static_config": read_config(static_path),
-        "robot_config": read_config(robot_path),
-        "kinematics_path": str(Path(kinematics_path).expanduser().resolve(strict=True)),
+        "arm_config": arm_config,
+        "profile": load_selected_profile(arm_config),
+        "kinematics_path": str(kinematics_path(arm_config)),
     }
 
 
@@ -46,13 +60,12 @@ def _number(value, name):
 
 def validate_profile(profile):
     """Check generated calibration fields before export."""
-    if not isinstance(profile, dict) or profile.get("schema_version") != 1:
-        raise ValueError("Expected a Tracker calibration with schema_version: 1")
+    if not isinstance(profile, dict):
+        raise ValueError("Expected a Tracker calibration mapping")
     try:
-        calibration = profile["calibration"]
-        chest = calibration["chest_mount"]
-        wrist = calibration["wrist_to_tianji"]
-        upper = calibration["upper_arm_rotations"]
+        chest = profile["chest_mount"]
+        wrist = profile["wrist_to_tianji"]
+        upper = profile["upper_arm_rotations"]
         for axis in ("x", "y", "z"):
             _number(chest["shared"][axis], f"chest_mount.shared.{axis}")
         for side in SIDES:
@@ -85,18 +98,20 @@ def validate_profile(profile):
     return profile
 
 
-def make_profile(result, tracker_config):
-    profile = {
-        "schema_version": 1,
-        "reference": deepcopy(result["reference"]),
-        "calibration": deepcopy(result["calibration"]),
-    }
-    profile["reference"]["tracker_serials"] = deepcopy(tracker_config["tracker_serials"])
-    profile["reference"]["wrist_offset_m"] = deepcopy(
-        tracker_config.get("wrist_offset") or [0.0, 0.0, 0.0])
-    if "fit" in result:
-        profile["fit"] = deepcopy(result["fit"])
+def make_profile(result):
+    profile = {key: deepcopy(result["calibration"][key]) for key in PROFILE_KEYS}
     return validate_profile(profile)
+
+
+def _flow_vectors(value):
+    if isinstance(value, dict):
+        return {key: _flow_vectors(item) for key, item in value.items()}
+    if isinstance(value, list):
+        sequence = CommentedSeq(_flow_vectors(item) for item in value)
+        if not any(isinstance(item, (dict, list)) for item in value):
+            sequence.fa.set_flow_style()
+        return sequence
+    return value
 
 
 def save_profile(path, profile):
@@ -105,6 +120,8 @@ def save_profile(path, profile):
     path = Path(path).expanduser().absolute()
     yaml = YAML()
     yaml.default_flow_style = False
+    yaml.indent(mapping=2, sequence=4, offset=2)
+    yaml.width = 4096
     with path.open("x", encoding="utf-8") as stream:
-        yaml.dump(profile, stream)
+        yaml.dump(_flow_vectors(profile), stream)
     return path

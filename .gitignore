@@ -42,7 +42,6 @@ tools/env.local.sh
 # to `<file>.yaml`, fills real values, and the live file stays out of git.
 # Launch helpers + Scan SNs UI both read the single `<file>.yaml` path.
 src/output_devices/wujihand_output/config/hand2.yaml
-src/input_devices/openvr_input/config/openvr_input.yaml
 
 # Temporary files
 *.tmp

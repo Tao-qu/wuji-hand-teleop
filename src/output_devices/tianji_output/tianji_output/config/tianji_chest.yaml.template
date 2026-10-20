@@ -1,21 +1,31 @@
-# Tianji Arm Chest-frame Configuration (HTC/Tracker pathway)
+# Home joint angles: degrees.
+left_arm:
+  home_joints: [55.0, -65.0, -70.0, -60.0, 60.0, 0.0, 0.0]
 
-# Robot IP address
-robot_ip: "192.168.1.190"
+right_arm:
+  home_joints: [-55.0, -65.0, 70.0, -60.0, -60.0, 0.0, 0.0]
 
-# Initial joint angles (degrees) — dual-arm forward-reach pose.
-init_joints:
-  left:  [55.0, -65.0, -70.0, -60.0, 60.0, 0.0, 0.0]
-  right: [-55.0, -65.0, 70.0, -60.0, -60.0, 0.0, 0.0]
+driver:
+  robot_ip: "192.168.1.190"
+  kinematics_model: "ccs_m6.MvKDCfg"
+  tool_dynamics:
+    source: controller
 
-# Preserve cabinet payload for initial integration. Switch to "configured"
-# only after measuring the complete hand + adapter + cable assembly.
-# Then supply independent left/right arrays:
-# [mass_kg, com_x_mm, com_y_mm, com_z_mm, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
-# Inertia units are kg*mm^2. No model nominal mass is imposed automatically.
-tool_dynamics:
-  source: controller
+controller:
+  control_rate: 120.0
+  state_publish_rate: 500.0
+  home_duration_sec: 8.0
+  handoff_hold_sec: 0.5
+  handoff_ramp_sec: 1.0
 
-# IK targets the arm flange by default. Optional tool_transforms.left/right
-# are rigid 4x4 flange-to-target matrices with translation in millimetres.
-# Apply a mounting offset here OR in the target TF chain, never both.
+openvr:
+  calibration_file: "tracker-neutral.yaml"
+  tracker_serials:
+    chest: "LHR-XXXXXXXX"
+    left_wrist: "LHR-XXXXXXXX"
+    right_wrist: "LHR-XXXXXXXX"
+    left_arm: "LHR-XXXXXXXX"
+    right_arm: "LHR-XXXXXXXX"
+  publish_rate_hz: 120.0
+  publish_tf: true
+  parent_frame: "world"

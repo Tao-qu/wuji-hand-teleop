@@ -6,10 +6,9 @@ import signal
 import time
 
 from .tracker_calibration_io import (
-    default_config,
+    calibration_path,
     load_context,
     make_profile,
-    read_config,
     save_profile,
 )
 
@@ -25,8 +24,8 @@ def _parser():
     parser = argparse.ArgumentParser(
         description="Inspect or calibrate five Trackers against the configured arm Home.",
         epilog="Calibration reads OpenVR and local kinematics only. "
-               "Copy exported calibration fields into the project configuration manually, "
-               "then restart teleoperation.",
+               "Select the exported profile with openvr.calibration_file in the arm "
+               "configuration, then restart teleoperation.",
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--inspect", action="store_true",
@@ -44,10 +43,10 @@ def _show_devices(devices):
         print(f"  {role:12s} {device['serial']:16s} {device['status']}")
 
 
-def _show_home(robot_config):
+def _show_home(arm_config):
     print("\nReference Home joint angles (degrees):")
     for side in ("left", "right"):
-        print(f"  {side}: {robot_config['init_joints'][side]}")
+        print(f"  {side}: {arm_config[side + '_arm']['home_joints']}")
 
 
 def _show_fit(result):
@@ -66,8 +65,9 @@ def _capture_and_fit(context, output):
     from .tracker_capture import TrackerCapture
     from .tracker_calibration import fit_calibration
 
-    _show_home(context["robot_config"])
-    with TrackerCapture(context["tracker_config"]["tracker_serials"]) as session:
+    arm_config = context["arm_config"]
+    _show_home(arm_config)
+    with TrackerCapture(arm_config["openvr"]["tracker_serials"]) as session:
         _show_devices(session.inspect())
         while True:
             print(
@@ -100,13 +100,11 @@ def _capture_and_fit(context, output):
                 continue
             if choice == "cancel":
                 return 2
-            profile = make_profile(result, context["tracker_config"])
+            profile = make_profile(result)
             path = save_profile(output, profile)
             print(f"Calibration exported to {path}")
-            print("Copy calibration.chest_mount and calibration.wrist_to_tianji into "
-                  "wuji_teleop_bringup/config/static_transforms.yaml.")
-            print("Copy calibration.upper_arm_rotations into "
-                  "openvr_input/config/openvr_input.yaml, then restart teleoperation.")
+            print("Set openvr.calibration_file in the arm configuration to this profile, "
+                  "then restart teleoperation.")
             return 0
 
 
@@ -121,24 +119,24 @@ def main(argv=None):
         args.output = args.output.expanduser()
     previous_sigterm = signal.signal(signal.SIGTERM, _interrupt)
     try:
-        tracker_path = default_config("openvr_input", "openvr_input.yaml")
-        robot_path = default_config("tianji_output", "tianji_chest.yaml")
+        from tianji_output.configuration import arm_config_path, load_arm_config
+
+        config_path = arm_config_path()
+        arm_config = load_arm_config(config_path)
+        print(f"Arm configuration: {config_path}")
+        print(f"Selected calibration: {calibration_path(arm_config)}")
         if args.calibrate:
             if args.output.exists() or args.output.is_symlink():
                 raise ValueError(f"Choose a new output file: {args.output}")
             if not args.output.parent.is_dir():
                 raise ValueError(f"Output directory does not exist: {args.output.parent}")
-            static_path = default_config("wuji_teleop_bringup", "static_transforms.yaml")
-            kinematics_path = default_config("tianji_output", "ccs_m6.MvKDCfg")
-            context = load_context(tracker_path, static_path, robot_path, kinematics_path)
+            context = load_context(arm_config)
             return _capture_and_fit(context, args.output)
 
         from .tracker_capture import TrackerCapture
 
-        tracker_config = read_config(tracker_path)
-        robot_config = read_config(robot_path)
-        _show_home(robot_config)
-        with TrackerCapture(tracker_config["tracker_serials"]) as session:
+        _show_home(arm_config)
+        with TrackerCapture(arm_config["openvr"]["tracker_serials"]) as session:
             _show_devices(session.inspect())
         return 0
     except (KeyboardInterrupt, EOFError):

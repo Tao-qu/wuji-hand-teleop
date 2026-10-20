@@ -4,18 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 import numpy as np
-
-from ament_index_python.packages import get_package_share_directory
-
-try:
-    import yaml
-except ImportError as exc:
-    raise ImportError("PyYAML is required to load configuration files.") from exc
 
 try:
     import rclpy
@@ -55,32 +48,26 @@ class OpenVRInputConfig:
     parent_frame: str = "world"
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "OpenVRInputConfig":
-        """Load configuration from a YAML file."""
-        cfg_path = Path(path).expanduser().resolve()
-        if not cfg_path.exists():
-            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+    def from_file(cls, path: str | Path | None = None) -> "OpenVRInputConfig":
+        """Read input settings and the selected profile from the arm config."""
+        from tianji_output.configuration import arm_config_path, load_arm_config
+        from .tracker_calibration_io import load_selected_profile
 
-        with cfg_path.open("r", encoding="utf-8") as handle:
-            raw = yaml.safe_load(handle) or {}
-
-        if not isinstance(raw, dict):
-            raise ValueError("OpenVRInputConfig expects a mapping at the root of the YAML file.")
-
-        valid_fields = {field.name for field in fields(cls)}
-        data: Dict[str, Any] = {"config_path": str(cfg_path)}
-        ignored_keys: list[str] = []
-
-        for key, value in raw.items():
-            if key in valid_fields:
-                data[key] = value
-            else:
-                ignored_keys.append(key)
-
-        if ignored_keys:
-            print(f"[OpenVRInputConfig] Ignoring unknown keys: {', '.join(sorted(ignored_keys))}")
-
-        return cls(**data)
+        cfg_path = arm_config_path(path or None)
+        arm_config = load_arm_config(cfg_path)
+        profile = load_selected_profile(arm_config)
+        settings = arm_config["openvr"]
+        data = {
+            key: settings[key]
+            for key in ("tracker_serials", "publish_rate_hz", "publish_tf", "parent_frame")
+            if key in settings
+        }
+        return cls(
+            config_path=str(cfg_path),
+            wrist_offset=profile["wrist_offset"],
+            upper_arm_rotations=profile["upper_arm_rotations"],
+            **data,
+        )
 
 
 class OpenVRInputNode(Node):
@@ -92,8 +79,7 @@ class OpenVRInputNode(Node):
 
         if not self.config.tracker_serials:
             raise ValueError(
-                "tracker_serials must be specified in config. "
-                "Run list_trackers.py to get your tracker serial numbers."
+                "openvr.tracker_serials must be specified in the arm configuration."
             )
 
         self.get_logger().info(
@@ -269,7 +255,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "-c",
         "--config",
         default=None,
-        help="Path to an OpenVR input YAML configuration file.",
+        help="Path to the arm YAML configuration (default: tianji_chest.yaml).",
     )
     return parser.parse_args(argv)
 
@@ -280,13 +266,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     cli_argv = remove_ros_args(raw_argv)[1:]
     args = _parse_args(cli_argv)
 
-    if args.config:
-        config_path = Path(args.config)
-    else:
-        share_dir = Path(get_package_share_directory("openvr_input"))
-        config_path = share_dir / "config" / "openvr_input.yaml"
-
-    config = OpenVRInputConfig.from_file(str(config_path))
+    config = OpenVRInputConfig.from_file(args.config)
 
     rclpy.init(args=raw_argv)
     node = OpenVRInputNode(config)

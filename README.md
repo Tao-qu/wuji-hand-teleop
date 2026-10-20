@@ -31,15 +31,14 @@ The fetch tool installs the pinned official model under `src/wuji-description`, 
 | Configuration | Purpose |
 | --- | --- |
 | `src/output_devices/wujihand_output/config/hand2.yaml` | Hand serials and namespaces, Home joint positions, SDK/ROS rates, MIT gains, and MANUS parameters |
-| `src/input_devices/openvr_input/config/openvr_input.yaml` | Five Tracker serials, wrist mounting offset, and upper-arm mounting rotations |
-| `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet IP, initial joint angles, tool dynamics source, and optional tool transforms |
-| `src/wuji_teleop_bringup/config/static_transforms.yaml` | Chest and wrist coordinate transforms |
+| `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Arm Home, driver/controller settings, five Tracker serials, and calibration profile selection |
+| `src/input_devices/openvr_input/calibration/tracker-neutral.yaml` | Wrist offset, chest/wrist transforms, and upper-arm mounting rotations |
 
 MANUS publishes right-handed coordinates. `controller.flip_y: false` preserves those XYZ positions for the SDK's built-in retargeting model. The bundled profiles retain the filenames `tpxLeftMetaglovePro.mcal` and `tpxRightMetaglovePro.mcal`; select other profiles through `manus.left_calibration_file` and `manus.right_calibration_file`. See the [MANUS guide](src/input_devices/manus_input/README.md).
 
-`tool_dynamics.source: controller` reuses the cabinet's payload values. Select `configured` to supply independent left/right mass, centre-of-mass, and inertia arrays as described in the template. Tool-transform translations use millimetres; Tracker offsets use metres. Apply a geometric tool offset once, in either the IK configuration or target TF chain.
+The arm configuration groups settings under `left_arm`, `right_arm`, `driver`, `controller`, and `openvr`. `driver.tool_dynamics.source: controller` reuses the cabinet's payload values; `configured` uses independent left/right mass, centre-of-mass, and inertia arrays. See [Local environment setup](docs/LOCAL_SETUP.md#4-configuration-and-build) for field units and structure.
 
-Neutral-pose calibration aligns the operator's starting pose with the configured arm Home. `chest_mount.<side>.local_xyz` and `wrist_to_tianji` in `static_transforms.yaml` store wrist position and orientation offsets. `upper_arm_rotations.left_arm/right_arm` in the local OpenVR YAML store 3×3 tracker-local mounting rotations; their Y columns provide the calibrated arm reference directions to the existing IK. These fixed offsets preserve subsequent relative motion. Recalibrate after changing Tracker mounting or the reference Home pose, then restart teleoperation to load the values.
+`openvr.calibration_file` selects one Tracker profile, loaded directly at startup. A filename such as `tracker-neutral.yaml` resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly. The profile contains `wrist_offset`, `chest_mount`, `wrist_to_tianji`, and `upper_arm_rotations`. Its fixed offsets align the operator's neutral pose with arm Home while preserving subsequent relative motion. After changing Tracker mounting or Home, [capture a new profile](docs/STEAMVR.md#neutral-pose-calibration), select it in the arm configuration, and restart teleoperation.
 
 ## Start teleoperation
 
@@ -73,6 +72,7 @@ ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false
 | `hand_auto_enable` | `true` | Enable each hand after connecting and configuring gains |
 | `arm_auto_enable` | `true` | Run arm initialization and start following |
 | `hand_config` | empty | Override the default local Hand 2 YAML path |
+| `arm_config` | empty | Override the default local Tianji arm YAML path |
 | `enable_rviz` | `false` | Show the Tracker visualization |
 
 To start processes with automatic enable turned off:
@@ -112,7 +112,7 @@ The command-line script provides the same three modes and loads the project envi
 ./tools/home.sh hands      # Both hands
 ```
 
-Home reads `left_hand.home_joints` and `right_hand.home_joints` from `hand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros, the open-hand reset target used by the Wuji Hand 2 implementation in `tianji_tele`. Arm Home reads `init_joints.left` and `init_joints.right` from `tianji_chest.yaml`, in degrees.
+Home reads `left_hand.home_joints` and `right_hand.home_joints` from `hand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros. Arm Home reads `left_arm.home_joints` and `right_arm.home_joints` from `tianji_chest.yaml`, in degrees, with the trajectory duration set by `controller.home_duration_sec`.
 
 The operation publishes hand targets through the existing hand transport and driver. Arms use the existing position-mode initialization and `move_to_init` trajectory, then remain in position mode. The session keeps the configured targets active until **Stop Home** or Ctrl-C, which closes the devices through their existing shutdown methods. Normal teleoperation startup is unchanged.
 
@@ -122,6 +122,7 @@ For direct ROS launch or a separate hand configuration:
 source tools/env.sh
 ros2 launch wuji_teleop_bringup wuji_home.launch.py mode:=both
 ./tools/home.sh hands hand_config:=/absolute/path/to/hand2.yaml
+./tools/home.sh arms arm_config:=/absolute/path/to/tianji_chest.yaml
 ```
 
 The monitor shows joint feedback, hand driver states, and the Home operation state. `ACTIVE` on `/wuji_home/state` means the hand targets are being published and the selected arm Home call has completed; it is not a hand-arrival measurement. Arm Home calls the SDK directly, so the monitor's ROS **Cmd Hz** column does not measure that trajectory's command rate.
@@ -134,6 +135,8 @@ ros2 launch wuji_teleop_bringup wuji_preview.launch.py
 ```
 
 This entrypoint starts MANUS with the bundled TPX profiles, the configured five Trackers, Hand 2 target models, and RViz. It uses `/preview/*` topics and does not start actuator drivers. The models show requested finger geometry; Tracker axes show the incoming poses. Labels show the last received input and targets. Close RViz or press Ctrl-C to stop. `start_inputs:=false` omits input readers, and `enable_rviz:=false` omits RViz.
+
+Teleoperation, Home, Preview, and the standalone OpenVR launch all accept `arm_config:=/absolute/path/to/tianji_chest.yaml`. Input launches resolve the Tracker settings and selected calibration profile from that file.
 
 ## Data contracts and code layout
 

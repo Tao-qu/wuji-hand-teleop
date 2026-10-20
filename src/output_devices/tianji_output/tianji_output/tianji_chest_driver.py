@@ -15,9 +15,8 @@ except ImportError:
     from .fault_codes import describe_fault_codes, read_servo_fault_codes
 import time
 import logging
-import os
-import yaml
-from ament_index_python.packages import get_package_share_directory
+from pathlib import Path
+from .configuration import kinematics_path, load_arm_config
 from .tool_parameters import apply_tool_parameters, tool_transform
 
 
@@ -29,17 +28,15 @@ class TianjiChestDriver:
     (direct angles). HTC/Tracker teleop uses the Cartesian pathway.
     """
 
-    def __init__(self, robot_ip='192.168.1.190', config_path=None, logger=None):
+    def __init__(self, robot_ip=None, config_path=None, logger=None, *, config=None):
         """
         Initialize both arms.
 
         Args:
-            robot_ip: robot controller IP address.
-            config_path: kinematics config file path.
-                - None: use the default 'ccs_m6.MvKDCfg' shipped in the
-                  ROS2 package share dir.
-                - absolute path: use it directly.
+            robot_ip: optional override for driver.robot_ip.
+            config_path: optional kinematics model path override.
             logger: optional external logger (e.g. ROS2 node logger).
+            config: complete arm configuration; otherwise load the default file.
         """
         if logger is not None:
             self.logger = logger
@@ -51,26 +48,16 @@ class TianjiChestDriver:
                 handler.setFormatter(logging.Formatter('[%(name)s] %(message)s'))
                 self.logger.addHandler(handler)
 
-        # Load tianji_chest.yaml
-        package_share = get_package_share_directory('tianji_output')
-        yaml_path = os.path.join(package_share, 'config', 'tianji_chest.yaml')
-        with open(yaml_path, 'r') as f:
-            cfg = yaml.safe_load(f)
-        self._tool_config = cfg
-
-        init_joints = cfg.get('init_joints')
-        if not init_joints or 'left' not in init_joints or 'right' not in init_joints:
-            raise ValueError(
-                f"tianji_chest.yaml missing init_joints.left/right: {yaml_path}")
-        self._init_joints_left = list(init_joints['left'])
-        self._init_joints_right = list(init_joints['right'])
-
-        # Resolve kinematics config path
-        if config_path is None:
-            config_filename = 'ccs_m6.MvKDCfg'
-            config_path = os.path.join(package_share, 'config', config_filename)
-
-        if not os.path.exists(config_path):
+        cfg = load_arm_config() if config is None else config
+        self._tool_config = cfg['driver']
+        self._init_joints_left = list(cfg['left_arm']['home_joints'])
+        self._init_joints_right = list(cfg['right_arm']['home_joints'])
+        if robot_ip is None:
+            robot_ip = cfg['driver']['robot_ip']
+        model_path = (Path(config_path).expanduser().resolve()
+                      if config_path is not None else kinematics_path(cfg))
+        config_path = str(model_path)
+        if not model_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
         self.logger.debug(f"Loading config: {config_path}")
@@ -87,7 +74,7 @@ class TianjiChestDriver:
             pnva=config_result['PNVA'][0],
             j67=config_result['BD'][0]
         )
-        self.kine_left.set_tool_kine(0, tool_transform(cfg, 'left'))
+        self.kine_left.set_tool_kine(0, tool_transform(self._tool_config, 'left'))
 
         self.logger.debug("[arm B] Initializing kinematics SDK...")
         self.kine_right = Marvin_Kine()
@@ -100,7 +87,7 @@ class TianjiChestDriver:
             pnva=config_result['PNVA'][1],
             j67=config_result['BD'][1]
         )
-        self.kine_right.set_tool_kine(1, tool_transform(cfg, 'right'))
+        self.kine_right.set_tool_kine(1, tool_transform(self._tool_config, 'right'))
 
         # ---------------------- Robot connection ----------------------
         self.logger.debug("Initializing robot control...")
