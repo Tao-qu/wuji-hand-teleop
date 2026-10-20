@@ -6,7 +6,7 @@ from wujihand_output.retargeting import Hand2Retargeter
 from wuji_hand2_driver.joint_mapping import joint_names
 
 
-TRACKERS = ("chest", "left_wrist", "right_wrist", "left_arm", "right_arm")
+TRACKERS = ("chest", "left_hand_back", "right_hand_back", "left_arm", "right_arm")
 STATUS_COLORS = {
     "RECEIVED": (0.2, 1.0, 0.35, 1.0),
     "NO_INPUT": (1.0, 0.75, 0.1, 1.0),
@@ -34,7 +34,7 @@ def status_marker_specs(snapshots):
                  if state in states.values())
     result.append({"id": 2, "position": (0.0, 0.0, 0.80), "height": 0.020,
                    "text": (f"TRACKER INPUTS - AXES ONLY\nChest: {states['chest']}\n"
-                            f"L wrist: {states['left_wrist']} | R wrist: {states['right_wrist']}\n"
+                            f"L hand back: {states['left_hand_back']} | R hand back: {states['right_hand_back']}\n"
                             f"L arm: {states['left_arm']} | R arm: {states['right_arm']}\n"
                             "No arm model or actuator feedback"),
                    "color": STATUS_COLORS[worst]})

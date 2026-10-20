@@ -84,7 +84,7 @@ def _rotation_from_y(direction):
 def fit_calibration(context, samples):
     """Fit synchronized raw world poses; return fields and console residuals.
 
-    ``samples`` maps chest, left/right_wrist and left/right_arm to (N, 4, 4)
+    ``samples`` maps chest, left/right_hand_back and left/right_arm to (N, 4, 4)
     arrays. Capture owns device validity and synchronization. This function
     performs no device acquisition, configuration writes or residual gating.
     """
@@ -93,7 +93,6 @@ def fit_calibration(context, samples):
     reference = home_reference(context)
     profile = context["profile"]
     chest_settings = profile["chest_mount"]
-    wrist_settings = profile["wrist_to_tianji"]
     raw_chest = np.asarray(samples["chest"], dtype=float)
     count = len(raw_chest)
     if count == 0:
@@ -102,30 +101,24 @@ def fit_calibration(context, samples):
     chest = raw_chest @ OpenVRTrackerWrapper._CHEST_CORRECTION
     chest_inverse_rotation = chest[:, :3, :3].transpose(0, 2, 1)
     shared = np.array([chest_settings["shared"][axis] for axis in ("x", "y", "z")])
-    wrist_offset = np.asarray(profile["wrist_offset"], dtype=float)
     data = {}
 
     for side in SIDES:
-        raw_wrist = np.asarray(samples[f"{side}_wrist"], dtype=float)
+        raw_hand_back = np.asarray(samples[f"{side}_hand_back"], dtype=float)
         raw_upper = np.asarray(samples[f"{side}_arm"], dtype=float)
         nominal = getattr(
-            OpenVRTrackerWrapper, f"_{side.upper()}_WRIST_CORRECTION"
+            OpenVRTrackerWrapper, f"_{side.upper()}_HAND_BACK_CORRECTION"
         )[:3, :3]
         base = _base_rotation(chest_settings[side])
         home = np.asarray(reference["home_tcp"][side])
         home_upper = np.asarray(reference["upper_arm_directions"][side])
-        static_offset = np.array([wrist_settings[side][axis] for axis in ("x", "y", "z")])
-
-        # The saved wrist translation is in the nominal corrected wrist frame.
-        # Keep it, as well as the raw tracker-local mounting-point offset.
-        world_point = raw_wrist[:, :3, 3] + raw_wrist[:, :3, :3] @ (
-            wrist_offset + nominal @ static_offset
-        )
+        # The human hand-back point is the raw Tracker origin.
+        world_point = raw_hand_back[:, :3, 3]
         chest_point = np.einsum(
             "nij,nj->ni", chest_inverse_rotation, world_point - chest[:, :3, 3]
         )
         base_point = (chest_point - shared) @ base
-        wrist_rotation = base.T @ chest_inverse_rotation @ raw_wrist[:, :3, :3]
+        hand_back_rotation = base.T @ chest_inverse_rotation @ raw_hand_back[:, :3, :3]
         upper_rotation = base.T @ chest_inverse_rotation @ raw_upper[:, :3, :3]
 
         data[side] = {
@@ -133,10 +126,10 @@ def fit_calibration(context, samples):
             "home": home,
             "home_upper": home_upper,
             "base_point": base_point,
-            "wrist_rotation": wrist_rotation,
+            "hand_back_rotation": hand_back_rotation,
             "upper_rotation": upper_rotation,
             "local_candidates": base_point - home[:3, 3],
-            "wrist_candidates": wrist_rotation.transpose(0, 2, 1) @ home[:3, :3],
+            "tcp_candidates": hand_back_rotation.transpose(0, 2, 1) @ home[:3, :3],
             "upper_candidates": upper_rotation.transpose(0, 2, 1) @ home_upper,
         }
 
@@ -145,8 +138,8 @@ def fit_calibration(context, samples):
         [left["local_candidates"], right["local_candidates"] @ ARM_MIRROR]
     ).mean(axis=0)
     raw_to_target_left = Rotation.from_matrix(np.concatenate([
-        left["wrist_candidates"],
-        TRACKER_MIRROR @ right["wrist_candidates"] @ ARM_MIRROR,
+        left["tcp_candidates"],
+        TRACKER_MIRROR @ right["tcp_candidates"] @ ARM_MIRROR,
     ])).mean().as_matrix()
     upper_direction_left = np.concatenate(
         [left["upper_candidates"], right["upper_candidates"] @ TRACKER_MIRROR]
@@ -160,9 +153,8 @@ def fit_calibration(context, samples):
     }
     upper = {"left": upper_left, "right": TRACKER_MIRROR @ upper_left @ TRACKER_MIRROR}
     calibration = {
-        "wrist_offset": wrist_offset.tolist(),
         "chest_mount": deepcopy(chest_settings),
-        "wrist_to_tianji": deepcopy(wrist_settings),
+        "hand_back_to_tcp": {side: {} for side in SIDES},
         "upper_arm_rotations": deepcopy(profile["upper_arm_rotations"]),
     }
     fit = {"sample_count": count}
@@ -171,21 +163,21 @@ def fit_calibration(context, samples):
         current = data[side]
         for axis, value in zip(("x", "y", "z"), local[side]):
             calibration["chest_mount"][side][f"local_{axis}"] = float(value)
-        # Runtime already applies nominal wrist correction before this static TF.
+        # Runtime applies nominal hand-back correction before this rotation-only TF.
         quaternion = Rotation.from_matrix(
             current["nominal"].T @ raw_to_target[side]
         ).as_quat()
         if quaternion[3] < 0:
             quaternion = -quaternion
         for key, value in zip(("qx", "qy", "qz", "qw"), quaternion):
-            calibration["wrist_to_tianji"][side][key] = float(value)
+            calibration["hand_back_to_tcp"][side][key] = float(value)
         calibration["upper_arm_rotations"][f"{side}_arm"] = upper[side].tolist()
 
         position_error = np.linalg.norm(
             current["base_point"] - local[side] - current["home"][:3, 3], axis=1
         )
-        wrist_angle = np.rad2deg(Rotation.from_matrix(
-            current["home"][:3, :3].T @ current["wrist_rotation"] @ raw_to_target[side]
+        tcp_angle = np.rad2deg(Rotation.from_matrix(
+            current["home"][:3, :3].T @ current["hand_back_rotation"] @ raw_to_target[side]
         ).magnitude())
         upper_direction = current["upper_rotation"] @ upper[side][:, 1]
         cosine = (upper_direction @ current["home_upper"]) / np.linalg.norm(
@@ -194,10 +186,10 @@ def fit_calibration(context, samples):
         upper_angle = np.rad2deg(np.arccos(np.clip(cosine, -1.0, 1.0)))
         fit[side] = {
             "mean_position_error_mm": float(position_error.mean() * 1000.0),
-            "mean_wrist_angle_deg": float(wrist_angle.mean()),
+            "mean_tcp_angle_deg": float(tcp_angle.mean()),
             "mean_upper_direction_angle_deg": float(upper_angle.mean()),
             "position_rms_m": float(np.sqrt(np.mean(position_error ** 2))),
-            "orientation_rms_deg": float(np.sqrt(np.mean(wrist_angle ** 2))),
+            "orientation_rms_deg": float(np.sqrt(np.mean(tcp_angle ** 2))),
             "upper_arm_rms_deg": float(np.sqrt(np.mean(upper_angle ** 2))),
         }
 

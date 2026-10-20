@@ -452,11 +452,11 @@ class TianjiArmControllerNode(Node):
     def _teleop_control(self):
         """Look up TF -> local IK -> hardware."""
         # Query TF
-        left_tf = self._lookup_transform("left_chest", "tianji_left")
+        left_tf = self._lookup_transform("left_chest", "left_tcp_target")
         if left_tf is not None:
             self.left_pose = self._matrix_to_pose(left_tf)
 
-        right_tf = self._lookup_transform("right_chest", "tianji_right")
+        right_tf = self._lookup_transform("right_chest", "right_tcp_target")
         if right_tf is not None:
             self.right_pose = self._matrix_to_pose(right_tf)
 

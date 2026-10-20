@@ -56,30 +56,28 @@ def create_chest_tf_nodes(config: dict, sides: list = None) -> list:
     return nodes
 
 
-def create_tianji_tf_nodes(config: dict, sides: list = None) -> list:
-    """Create wrist to tianji TF nodes."""
+def create_tcp_target_tf_nodes(config: dict, sides: list = None) -> list:
+    """Align hand-back Tracker axes with the tool TCP, keeping its origin."""
     if sides is None:
         sides = ["left", "right"]
 
-    tianji = config["wrist_to_tianji"]
+    alignment = config["hand_back_to_tcp"]
     nodes = []
 
     for side in sides:
-        t = tianji[side]
+        t = alignment[side]
         nodes.append(Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            name=f"tianji_{side}_tf",
+            name=f"{side}_tcp_target_tf",
             arguments=[
-                "--x", str(t["x"]),
-                "--y", str(t["y"]),
-                "--z", str(t["z"]),
+                "--x", "0", "--y", "0", "--z", "0",
                 "--qx", str(t["qx"]),
                 "--qy", str(t["qy"]),
                 "--qz", str(t["qz"]),
                 "--qw", str(t["qw"]),
-                "--frame-id", f"{side}_wrist",
-                "--child-frame-id", f"tianji_{side}",
+                "--frame-id", f"{side}_hand_back",
+                "--child-frame-id", f"{side}_tcp_target",
             ],
         ))
 

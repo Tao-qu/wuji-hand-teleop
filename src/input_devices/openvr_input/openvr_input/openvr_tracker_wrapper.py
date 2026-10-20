@@ -43,26 +43,26 @@ class OpenVRTrackerWrapper:
 
     Args:
         tracker_serials: Dictionary mapping roles to tracker serial numbers
-                        e.g., {'chest': 'LHR-xxx', 'right_wrist': 'LHR-yyy', 'left_wrist': 'LHR-zzz'}
-        wrist_offset: Optional offset [x, y, z] in tracker's local frame (meters).
-                     Applied before coordinate correction to map tracker position to wrist.
+                        e.g., {'chest': 'LHR-xxx', 'right_hand_back': 'LHR-yyy',
+                               'left_hand_back': 'LHR-zzz'}
         upper_arm_rotations: Optional left_arm/right_arm 3x3 rotations. Columns
                              are calibrated-frame axes in the raw tracker frame.
 
     Example:
         >>> wrapper = OpenVRTrackerWrapper({
         ...     'chest': 'LHR-12345678',
-        ...     'right_wrist': 'LHR-87654321',
-        ...     'left_wrist': 'LHR-11223344'
-        ... }, wrist_offset=[0.0, 0.0, -0.05])
+        ...     'right_hand_back': 'LHR-87654321',
+        ...     'left_hand_back': 'LHR-11223344'
+        ... })
         >>> poses = wrapper.get_poses()
         >>> print(poses['chest'].shape)  # (4, 4)
     """
 
     # Pre-computed correction matrices:
     # - Chest: Rx(90°, flip xz) @ Rz(180°)
-    # - Right wrist: Ry(90°) @ Rz(-90°) @ Ry(180°)
-    # - Left wrist: Ry(90°) @ Rz(90°) @ Ry(180°)
+    # - Right hand back: Ry(90°) @ Rz(-90°) @ Ry(180°)
+    # - Left hand back: Ry(90°) @ Rz(90°) @ Ry(180°)
+    # These rotations preserve the raw Tracker origin.
     _CHEST_CORRECTION = np.array([
         [1, 0, 0, 0],
         [0, 0, 1, 0],
@@ -70,25 +70,24 @@ class OpenVRTrackerWrapper:
         [0, 0, 0, 1]
     ], dtype=np.float32)
 
-    _RIGHT_WRIST_CORRECTION = np.array([
+    _RIGHT_HAND_BACK_CORRECTION = np.array([
         [0, 0, -1, 0],
         [1, 0, 0, 0],
         [0, -1, 0, 0],
         [0, 0, 0, 1]
     ], dtype=np.float32)
 
-    _LEFT_WRIST_CORRECTION = np.array([
+    _LEFT_HAND_BACK_CORRECTION = np.array([
         [0, 0, -1, 0],
         [-1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 0, 1]
     ], dtype=np.float32)
 
-    def __init__(self, tracker_serials: Dict[str, str], wrist_offset: Optional[list] = None,
+    def __init__(self, tracker_serials: Dict[str, str],
                  upper_arm_rotations: Optional[Dict[str, list]] = None):
         ## YOU HAVE TO RUN STEAMVR FIRST
         self.tracker_serials = tracker_serials
-        self._wrist_offset = np.array(wrist_offset, dtype=np.float32) if wrist_offset else None
         self._upper_arm_corrections = {}
         for role in ('left_arm', 'right_arm'):
             correction = np.eye(4, dtype=np.float32)
@@ -189,8 +188,8 @@ class OpenVRTrackerWrapper:
         Returns:
             dict: Dictionary containing corrected 4x4 transformation matrices:
                 - 'chest': chest tracker pose (corrected)
-                - 'right_wrist': right wrist pose (corrected)
-                - 'left_wrist': left wrist pose (corrected)
+                - 'right_hand_back': right hand-back Tracker origin (corrected axes)
+                - 'left_hand_back': left hand-back Tracker origin (corrected axes)
                 Values are None if tracker not detected or pose invalid.
         """
         if not self._is_connected or self._vr_system is None:
@@ -203,20 +202,13 @@ class OpenVRTrackerWrapper:
             raw_pose = self._get_tracker_pose(device_index)
 
             if raw_pose is not None:
-                # Apply wrist offset before coordinate correction (for wrist trackers only)
-                if role in ('right_wrist', 'left_wrist') and self._wrist_offset is not None:
-                    # Convert local offset to world frame and apply
-                    rotation = raw_pose[:3, :3]
-                    world_offset = rotation @ self._wrist_offset
-                    raw_pose[:3, 3] += world_offset
-
                 # Apply coordinate correction based on role
                 if role == 'chest':
                     corrected_pose = raw_pose @ self._CHEST_CORRECTION
-                elif role == 'right_wrist':
-                    corrected_pose = raw_pose @ self._RIGHT_WRIST_CORRECTION
-                elif role == 'left_wrist':
-                    corrected_pose = raw_pose @ self._LEFT_WRIST_CORRECTION
+                elif role == 'right_hand_back':
+                    corrected_pose = raw_pose @ self._RIGHT_HAND_BACK_CORRECTION
+                elif role == 'left_hand_back':
+                    corrected_pose = raw_pose @ self._LEFT_HAND_BACK_CORRECTION
                 elif role in ('left_arm', 'right_arm'):
                     # Calibrated local Y supplies the upper-arm reference direction.
                     corrected_pose = raw_pose @ self._upper_arm_corrections[role]

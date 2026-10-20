@@ -10,8 +10,8 @@ from ruamel.yaml.comments import CommentedSeq
 
 SIDES = ("left", "right")
 CHEST_KEYS = ("roll", "pitch", "yaw", "local_x", "local_y", "local_z")
-WRIST_KEYS = ("x", "y", "z", "qx", "qy", "qz", "qw")
-PROFILE_KEYS = ("wrist_offset", "chest_mount", "wrist_to_tianji", "upper_arm_rotations")
+QUATERNION_KEYS = ("qx", "qy", "qz", "qw")
+PROFILE_KEYS = ("chest_mount", "hand_back_to_tcp", "upper_arm_rotations")
 
 
 def read_config(path):
@@ -64,18 +64,18 @@ def validate_profile(profile):
         raise ValueError("Expected a Tracker calibration mapping")
     try:
         chest = profile["chest_mount"]
-        wrist = profile["wrist_to_tianji"]
+        hand_back_to_tcp = profile["hand_back_to_tcp"]
         upper = profile["upper_arm_rotations"]
         for axis in ("x", "y", "z"):
             _number(chest["shared"][axis], f"chest_mount.shared.{axis}")
         for side in SIDES:
             for key in CHEST_KEYS:
                 _number(chest[side][key], f"chest_mount.{side}.{key}")
-            for key in WRIST_KEYS:
-                _number(wrist[side][key], f"wrist_to_tianji.{side}.{key}")
-            norm = sum(wrist[side]["q" + axis] ** 2 for axis in ("x", "y", "z", "w"))
+            for key in QUATERNION_KEYS:
+                _number(hand_back_to_tcp[side][key], f"hand_back_to_tcp.{side}.{key}")
+            norm = sum(hand_back_to_tcp[side][key] ** 2 for key in QUATERNION_KEYS)
             if not math.isclose(norm, 1.0, rel_tol=1e-6, abs_tol=1e-6):
-                raise ValueError(f"{side} wrist quaternion must have unit length")
+                raise ValueError(f"{side} hand-back-to-TCP quaternion must have unit length")
             matrix = upper[side + "_arm"]
             if len(matrix) != 3 or any(len(row) != 3 for row in matrix):
                 raise ValueError(f"{side} upper-arm rotation must be 3x3")

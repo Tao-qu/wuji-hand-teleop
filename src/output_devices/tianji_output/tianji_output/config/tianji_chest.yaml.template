@@ -8,6 +8,19 @@ right_arm:
 driver:
   robot_ip: "192.168.1.190"
   kinematics_model: "ccs_m6.MvKDCfg"
+  # Flange -> virtual hand-back TCP, mm; TCP axes parallel to flange axes.
+  # Approximate mounting: +Z toward fingers; dorsal -Y left, +Y right.
+  tool_transforms:
+    left:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, -50]
+      - [0, 0, 1, 70]
+      - [0, 0, 0, 1]
+    right:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 50]
+      - [0, 0, 1, 70]
+      - [0, 0, 0, 1]
   tool_dynamics:
     source: controller
 
@@ -22,8 +35,8 @@ openvr:
   calibration_file: "tracker-neutral.yaml"
   tracker_serials:
     chest: "LHR-XXXXXXXX"
-    left_wrist: "LHR-XXXXXXXX"
-    right_wrist: "LHR-XXXXXXXX"
+    left_hand_back: "LHR-XXXXXXXX"
+    right_hand_back: "LHR-XXXXXXXX"
     left_arm: "LHR-XXXXXXXX"
     right_arm: "LHR-XXXXXXXX"
   publish_rate_hz: 120.0

@@ -1,6 +1,6 @@
 # MANUS–Tianji–Wuji Hand 2 Teleoperation
 
-A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. A pair of MANUS gloves supplies finger motion; five HTC Vive Trackers supply chest, wrist, and upper-arm poses. Finger retargeting and hand communication use the official `wuji-sdk==2026.10.12`; visualization uses the official Hand 2.2 model.
+A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. A pair of MANUS gloves supplies finger motion; five HTC Vive Trackers supply chest, hand-back, and upper-arm poses. Finger retargeting and hand communication use the official `wuji-sdk==2026.10.12`; visualization uses the official Hand 2.2 model.
 
 ## Hardware and modes
 
@@ -11,7 +11,7 @@ A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. A pai
 | Arms only | Five Trackers | Two Tianji arms |
 | Preview | MANUS gloves and five Trackers | RViz hand targets and Tracker poses |
 
-Mount the Trackers on the chest, both wrists, and both upper arms. Hands-only operation does not require SteamVR. Hand connections use SDK discovery and the configured serial numbers.
+Mount the Trackers on the chest, the back of each hand, and both upper arms. Hands-only operation does not require SteamVR. Hand connections use SDK discovery and the configured serial numbers.
 
 ## Installation and configuration
 
@@ -32,13 +32,15 @@ The fetch tool installs the pinned official model under `src/wuji-description`, 
 | --- | --- |
 | `src/output_devices/wujihand_output/config/hand2.yaml` | Hand serials and namespaces, Home joint positions, SDK/ROS rates, MIT gains, and MANUS parameters |
 | `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Arm Home, driver/controller settings, five Tracker serials, and calibration profile selection |
-| `src/input_devices/openvr_input/calibration/tracker-neutral.yaml` | Wrist offset, chest/wrist transforms, and upper-arm mounting rotations |
+| `src/input_devices/openvr_input/calibration/tracker-neutral.yaml` | Chest transforms, hand-back-to-TCP orientations, and upper-arm mounting rotations |
 
 MANUS publishes right-handed coordinates. `controller.flip_y: false` preserves those XYZ positions for the SDK's built-in retargeting model. The bundled profiles retain the filenames `tpxLeftMetaglovePro.mcal` and `tpxRightMetaglovePro.mcal`; select other profiles through `manus.left_calibration_file` and `manus.right_calibration_file`. See the [MANUS guide](src/input_devices/manus_input/README.md).
 
 The arm configuration groups settings under `left_arm`, `right_arm`, `driver`, `controller`, and `openvr`. `driver.tool_dynamics.source: controller` reuses the cabinet's payload values; `configured` uses independent left/right mass, centre-of-mass, and inertia arrays. See [Local environment setup](docs/LOCAL_SETUP.md#4-configuration-and-build) for field units and structure.
 
-`openvr.calibration_file` selects one Tracker profile, loaded directly at startup. A filename such as `tracker-neutral.yaml` resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly. The profile contains `wrist_offset`, `chest_mount`, `wrist_to_tianji`, and `upper_arm_rotations`. Its fixed offsets align the operator's neutral pose with arm Home while preserving subsequent relative motion. After changing Tracker mounting or Home, [capture a new profile](docs/STEAMVR.md#neutral-pose-calibration), select it in the arm configuration, and restart teleoperation.
+`openvr.calibration_file` selects one Tracker profile, loaded directly at startup. A filename such as `tracker-neutral.yaml` resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly. The profile contains `chest_mount`, `hand_back_to_tcp`, and `upper_arm_rotations`. The raw `left_hand_back` and `right_hand_back` Tracker origins supply position directly; the per-side `hand_back_to_tcp` quaternions align their orientations with `left_tcp_target` and `right_tcp_target`.
+
+`driver.tool_transforms.left/right` define the robot flange-to-virtual-hand-back-TCP geometry, with translations in millimetres and TCP axes parallel to the flange axes. The local Tianji IK applies this geometry once. Neutral-pose calibration aligns the human Tracker targets with the robot TCPs at Home. After changing tool geometry, Tracker mounting, or Home, [capture a new profile](docs/STEAMVR.md#neutral-pose-calibration), select it in the arm configuration, and restart teleoperation. Home joint targets and the arm control sequence remain configured as before.
 
 ## Start teleoperation
 

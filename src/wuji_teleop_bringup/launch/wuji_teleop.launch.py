@@ -9,7 +9,7 @@ from launch_ros.actions import Node
 from tianji_output.configuration import arm_config_path, load_arm_config
 from openvr_input.tracker_calibration_io import load_selected_profile
 from wuji_teleop_bringup.launch_utils import resolve_config_path
-from wuji_teleop_bringup.tf_utils import create_chest_tf_nodes, create_tianji_tf_nodes
+from wuji_teleop_bringup.tf_utils import create_chest_tf_nodes, create_tcp_target_tf_nodes
 
 
 def _enabled(context, name):
@@ -52,7 +52,7 @@ def _nodes(context):
         nodes.append(Node(package="openvr_input", executable="openvr_input", output="screen",
                           arguments=["-c", str(arm_path)]))
         nodes.extend(create_chest_tf_nodes(calibration))
-        nodes.extend(create_tianji_tf_nodes(calibration))
+        nodes.extend(create_tcp_target_tf_nodes(calibration))
         nodes.append(Node(package="controller", executable="tianji_arm_controller", output="screen",
                           arguments=["-c", str(arm_path)],
                           parameters=[{"auto_enable": _enabled(context, "arm_auto_enable"),

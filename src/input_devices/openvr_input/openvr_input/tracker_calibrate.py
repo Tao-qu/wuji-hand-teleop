@@ -40,7 +40,7 @@ def _parser():
 def _show_devices(devices):
     print("\nConfigured Trackers:")
     for role, device in devices.items():
-        print(f"  {role:12s} {device['serial']:16s} {device['status']}")
+        print(f"  {role:15s} {device['serial']:16s} {device['status']}")
 
 
 def _show_home(arm_config):
@@ -56,7 +56,7 @@ def _show_fit(result):
         values = fit[side]
         print(
             f"  {side}: position {values['mean_position_error_mm']:.3f} mm, "
-            f"wrist {values['mean_wrist_angle_deg']:.3f} deg, "
+            f"TCP orientation {values['mean_tcp_angle_deg']:.3f} deg, "
             f"upper arm {values['mean_upper_direction_angle_deg']:.3f} deg"
         )
 

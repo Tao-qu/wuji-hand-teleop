@@ -31,11 +31,8 @@ class OpenVRInputConfig:
 
     # Tracker serial numbers
     tracker_serials: Optional[Dict[str, str]] = None
-    # e.g., {'chest': 'LHR-xxx', 'right_wrist': 'LHR-yyy', 'left_wrist': 'LHR-zzz'}
-
-    # Wrist tracker offset in tracker's local frame [x, y, z] (meters)
-    # Applied before coordinate correction to map tracker position to actual wrist
-    wrist_offset: Optional[list] = None
+    # e.g., {'chest': 'LHR-xxx', 'right_hand_back': 'LHR-yyy',
+    #        'left_hand_back': 'LHR-zzz'}
 
     # Tracker-local rotations for the calibrated upper-arm frames.
     upper_arm_rotations: Optional[Dict[str, list]] = None
@@ -64,7 +61,6 @@ class OpenVRInputConfig:
         }
         return cls(
             config_path=str(cfg_path),
-            wrist_offset=profile["wrist_offset"],
             upper_arm_rotations=profile["upper_arm_rotations"],
             **data,
         )
@@ -85,15 +81,9 @@ class OpenVRInputNode(Node):
         self.get_logger().info(
             f"[OpenVR Input] Initializing with trackers: {list(self.config.tracker_serials.keys())}"
         )
-        if self.config.wrist_offset:
-            self.get_logger().info(
-                f"[OpenVR Input] Wrist offset (local frame): {self.config.wrist_offset}"
-            )
-
         # Initialize OpenVR tracker wrapper
         self.tracker_wrapper = OpenVRTrackerWrapper(
             self.config.tracker_serials,
-            wrist_offset=self.config.wrist_offset,
             upper_arm_rotations=self.config.upper_arm_rotations,
         )
 
@@ -112,7 +102,7 @@ class OpenVRInputNode(Node):
         self.get_logger().info(
             f"[OpenVR Input] Publishing TF at {self.config.publish_rate_hz:.1f} Hz"
         )
-        self.get_logger().info("[OpenVR Input] Publishing TF: chest, right_wrist, left_wrist, left_arm, right_arm")
+        self.get_logger().info("[OpenVR Input] Publishing TF: chest, right_hand_back, left_hand_back, left_arm, right_arm")
 
     def _publish_callback(self) -> None:
         """Timer callback to fetch and publish tracker data as TF."""
@@ -138,23 +128,23 @@ class OpenVRInputNode(Node):
                 current_time
             )
 
-        # Process right wrist
-        right_wrist_pose = poses.get('right_wrist')
-        if right_wrist_pose is not None:
+        # Process right hand-back Tracker origin
+        right_hand_back_pose = poses.get('right_hand_back')
+        if right_hand_back_pose is not None:
             self._broadcast_tf(
-                right_wrist_pose,
+                right_hand_back_pose,
                 self.config.parent_frame,
-                "right_wrist",
+                "right_hand_back",
                 current_time
             )
 
-        # Process left wrist
-        left_wrist_pose = poses.get('left_wrist')
-        if left_wrist_pose is not None:
+        # Process left hand-back Tracker origin
+        left_hand_back_pose = poses.get('left_hand_back')
+        if left_hand_back_pose is not None:
             self._broadcast_tf(
-                left_wrist_pose,
+                left_hand_back_pose,
                 self.config.parent_frame,
-                "left_wrist",
+                "left_hand_back",
                 current_time
             )
 

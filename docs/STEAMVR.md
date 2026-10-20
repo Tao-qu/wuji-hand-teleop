@@ -4,7 +4,7 @@
 
 Install Steam and SteamVR in the local graphical session, using the same operating-system account that runs teleoperation. Prepare five compatible Vive Trackers, their USB receivers, and Lighthouse base stations covering the workspace.
 
-Pair each device through SteamVR and confirm valid tracking for every Tracker. Mount them on the chest, both wrists, and both upper arms. Upper-arm directions are used to resolve arm redundancy and must not be omitted. See the [wearing guide](tracker-wearing-guide.md).
+Pair each device through SteamVR and confirm valid tracking for every Tracker. Mount them on the chest, the back of each hand, and both upper arms. Upper-arm directions are used to resolve arm redundancy and must not be omitted. See the [wearing guide](tracker-wearing-guide.md).
 
 ## Headset-free configuration
 
@@ -48,8 +48,8 @@ openvr:
   calibration_file: tracker-neutral.yaml
   tracker_serials:
     chest: LHR-CHEST
-    left_wrist: LHR-LEFT-WRIST
-    right_wrist: LHR-RIGHT-WRIST
+    left_hand_back: LHR-LEFT-HAND-BACK
+    right_hand_back: LHR-RIGHT-HAND-BACK
     left_arm: LHR-LEFT-ARM
     right_arm: LHR-RIGHT-ARM
   publish_rate_hz: 120.0
@@ -57,11 +57,13 @@ openvr:
   parent_frame: world
 ```
 
-The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `wrist_offset`, `chest_mount`, `wrist_to_tianji`, and `upper_arm_rotations`. A filename resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly. `wrist_offset` is the Tracker-to-wrist offset in the raw Tracker frame, in metres, and must match the mounting.
+The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `chest_mount`, `hand_back_to_tcp`, and `upper_arm_rotations`. A filename resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly.
+
+The raw `left_hand_back` and `right_hand_back` Tracker origins provide position directly. The profile's per-side `hand_back_to_tcp` quaternions rotate their axes into `left_tcp_target` and `right_tcp_target`, with zero translation. Robot flange-to-virtual-hand-back-TCP geometry belongs in `driver.tool_transforms.left/right`, in millimetres. The TCP axes are parallel to the flange axes, and the local Tianji IK applies this tool geometry once.
 
 ## Neutral-pose calibration
 
-Set the arm Home joint positions, Tracker serials, and wrist offset before calibration. Keep SteamVR running and stop other OpenVR input processes. The calibration CLI uses the default project `tianji_chest.yaml`, reads Tracker poses and local kinematics, and does not connect to the cabinet.
+Set the arm Home joint positions, Tracker serials, and flange-to-TCP tool transforms before calibration. Keep SteamVR running and stop other OpenVR input processes. The calibration CLI uses the default project `tianji_chest.yaml`, reads Tracker poses and local kinematics, and does not connect to the cabinet.
 
 ```bash
 source tools/env.sh
@@ -72,7 +74,7 @@ ros2 run openvr_input tracker_calibrate --calibrate \
 
 Choose a new output filename in an existing directory. Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. Keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
 
-After saving, set `openvr.calibration_file` in `tianji_chest.yaml` to the exported file's absolute path and restart teleoperation. Profiles installed in the `openvr_input` package's `calibration` directory can be selected by filename. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing mounting or the reference Home pose.
+After saving, set `openvr.calibration_file` in `tianji_chest.yaml` to the exported file's absolute path and restart teleoperation. Profiles installed in the `openvr_input` package's `calibration` directory can be selected by filename. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing tool geometry, mounting, or the reference Home pose.
 
 ## Verification and operation
 
@@ -80,7 +82,7 @@ Start only the input node first, without connecting to the arms. Run the TF insp
 
 ```bash
 ros2 launch openvr_input openvr_input.launch.py
-ros2 run tf2_ros tf2_echo chest left_wrist
+ros2 run tf2_ros tf2_echo chest left_hand_back
 ```
 
 The standalone launch reads the same arm configuration and calibration profile as teleoperation. To select another arm configuration, add `arm_config:=/absolute/path/to/tianji_chest.yaml`. Confirm that all five TF frames follow the corresponding body segments correctly. Stop the standalone input process before starting the arm pipeline:
@@ -91,4 +93,4 @@ ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false enable_
 
 This launch automatically enables the arms and moves them to the configured initial pose before Tracker control. Pass `arm_auto_enable:=false` to enable them later through the GUI or ROS service.
 
-The arms use chest-frame target poses and upper-arm directions to compute IK. Incorrect input configuration or mounting orientation can produce incorrect targets. Check RViz coordinate axes, the initial pose, and the emergency stop before the first run.
+The arms use `left_tcp_target` and `right_tcp_target` poses relative to their respective chest frames, together with upper-arm directions, to compute IK. RViz labels the raw hand-back axes separately from the TCP target axes. Incorrect input configuration or mounting orientation can produce incorrect targets. Check RViz coordinate axes, the initial pose, and the emergency stop before the first run.

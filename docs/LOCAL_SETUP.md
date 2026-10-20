@@ -80,25 +80,28 @@ The arm configuration contains:
 - `driver.robot_ip`: cabinet SDK endpoint. `driver.kinematics_model`: the Tianji kinematics configuration filename in the `tianji_output` package's `config` directory, or an absolute path.
 - `driver.tool_dynamics`: payload source and optional per-arm parameters, described below.
 - `controller.control_rate` and `controller.state_publish_rate`: command and feedback publication rates in Hz. `home_duration_sec` controls the Home trajectory duration; `handoff_hold_sec` and `handoff_ramp_sec` control the measured-pose hold and blend into Tracker following, all in seconds.
-- `openvr.tracker_serials`: `chest`, `left_wrist`, `right_wrist`, `left_arm`, and `right_arm` serial numbers. `publish_rate_hz`, `publish_tf`, and `parent_frame` control Tracker publication.
+- `openvr.tracker_serials`: `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, and `right_arm` serial numbers. `publish_rate_hz`, `publish_tf`, and `parent_frame` control Tracker publication.
 - `openvr.calibration_file`: the selected Tracker profile. A filename resolves in the `openvr_input` package's `calibration` directory; an absolute path is read directly.
 
 Keep `driver.tool_dynamics.source: controller` to reuse the cabinet's payload values. To supply measured payloads, set `source: configured` and provide separate `left` and `right` arrays of ten values:
 
 ```text
-[mass_kg, com_x_mm, com_y_mm, com_z_mm, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
+[mass, com_x, com_y, com_z, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
 ```
 
-The six inertia entries use kg·mm². Include the complete hand, adapter, and cable assembly. Optional `driver.tool_transforms.left` and `.right` are rigid 4×4 flange-to-target matrices, with translation in millimetres; omitting them selects identity transforms. Apply each geometric offset once, either here or in the target TF chain.
+Confirm payload units and inertia conventions with the Tianji vendor before supplying configured values. Include the complete hand, adapter, and cable assembly. Payload units are separate from the kinematic translation units below.
 
-The selected Tracker profile has four top-level fields:
+`driver.tool_transforms.left` and `.right` are rigid 4×4 transforms from each robot flange to its virtual hand-back TCP. Their translation columns use millimetres; the TCP axes are chosen parallel to the corresponding flange axes, so the 3×3 rotation blocks are identity. Express the measured TCP position in the flange frame, including the installed adapter. The local Tianji IK uses these transforms once to solve for the flange pose. The Tracker target TF chain contains no additional copy of this tool translation.
 
-- `wrist_offset`: `[x, y, z]` in metres, expressed in the raw wrist Tracker frame.
+The current approximate mounting uses flange +Z toward the fingers, with the back of the hand facing flange −Y on the left and +Y on the right. A TCP 70 mm toward the fingers, 0 mm across the palm, and 50 mm toward the back of the hand therefore gives translation columns `[0, -50, 70]` and `[0, 50, 70]` mm respectively. These directions describe this installation; update the matrices when the measured mounting differs.
+
+The selected Tracker profile has three top-level fields:
+
 - `chest_mount`: shared chest-frame translation and per-side `roll`, `pitch`, `yaw`, `local_x`, `local_y`, `local_z`. Translations are in metres and Euler angles in radians.
-- `wrist_to_tianji`: per-side translation `x`, `y`, `z` in metres and quaternion `qx`, `qy`, `qz`, `qw`.
+- `hand_back_to_tcp`: per-side quaternion `qx`, `qy`, `qz`, `qw` aligning the hand-back Tracker orientation with the target TCP orientation. This transform has zero translation.
 - `upper_arm_rotations`: `left_arm` and `right_arm` 3×3 rotations. Columns are calibrated axes in the raw Tracker frame; the Y column supplies the arm reference direction to IK.
 
-The bundled profile is `src/input_devices/openvr_input/calibration/tracker-neutral.yaml`. Runtime loads the selected profile directly. See [neutral-pose calibration](STEAMVR.md#neutral-pose-calibration) to export a new one.
+The raw `left_hand_back` and `right_hand_back` Tracker origins provide position directly, without a wrist offset. Their orientation-corrected target frames are `left_tcp_target` and `right_tcp_target`. The bundled profile is `src/input_devices/openvr_input/calibration/tracker-neutral.yaml`; runtime loads the selected profile directly. After changing tool transforms, Tracker mounting, or Home joint targets, [export a new neutral-pose profile](STEAMVR.md#neutral-pose-calibration), select it with `openvr.calibration_file`, and restart teleoperation. Home joint targets and controller settings remain independent of the tool geometry.
 
 The configuration tool manages only the hand and arm templates and never replaces an existing local file. `python3 tools/configure.py --check` reports missing local files without writing. Generate local configuration before building, so the files are installed into ROS share directories:
 

@@ -15,7 +15,7 @@ except ImportError:
 from .openvr_tracker_wrapper import pose_matrix_to_numpy
 
 
-TRACKER_ROLES = ("chest", "left_wrist", "right_wrist", "left_arm", "right_arm")
+TRACKER_ROLES = ("chest", "left_hand_back", "right_hand_back", "left_arm", "right_arm")
 
 
 class TrackerCapture:

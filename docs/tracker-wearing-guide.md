@@ -7,11 +7,11 @@ Before wearing the Trackers, pair them with SteamVR and confirm their serial num
 ```yaml
 openvr:
   tracker_serials:
-    chest: "LHR-xxxxxxx1"         # Chest
-    right_wrist: "LHR-xxxxxxx2"   # Right wrist
-    left_wrist: "LHR-xxxxxxx3"    # Left wrist
-    left_arm: "LHR-xxxxxxx4"      # Left upper arm
-    right_arm: "LHR-xxxxxxx5"     # Right upper arm
+    chest: "LHR-xxxxxxx1"            # Chest
+    right_hand_back: "LHR-xxxxxxx2"  # Back of right hand
+    left_hand_back: "LHR-xxxxxxx3"   # Back of left hand
+    left_arm: "LHR-xxxxxxx4"         # Left upper arm
+    right_arm: "LHR-xxxxxxx5"        # Right upper arm
 ```
 
 > [!NOTE]
@@ -19,7 +19,9 @@ openvr:
 
 ## Wear the Tracker
 
-Use the **USB-C port** on each Tracker as the orientation reference:
+Secure one Tracker to the back of each hand so it moves with the hand. Keep its mounting position and orientation fixed after calibration. The system uses the raw Tracker origin directly as the hand-back position.
+
+Use the **USB-C port** as the orientation reference for the other Trackers:
 
 - **Arm Tracker**: USB-C port aligned with the arm bone, pointing **toward the torso**
 - **Chest Tracker**: USB-C port faces **upward** along the torso
@@ -28,7 +30,7 @@ The complete wearing setup is shown below.
 
 ![Tracker wearing setup](images/tracker-wearing-combined.jpg)
 
-After securing the Trackers, [capture a neutral-pose profile](STEAMVR.md#neutral-pose-calibration) for the configured arm Home. Select that file with `openvr.calibration_file` in `tianji_chest.yaml` and restart teleoperation. Recalibrate when the mounting changes.
+Configure each robot's flange-to-virtual-hand-back-TCP transform in `driver.tool_transforms.left/right`, then [capture a neutral-pose profile](STEAMVR.md#neutral-pose-calibration) for the configured arm Home. The profile aligns the hand-back Tracker orientation with the TCP axes. Select the exported file with `openvr.calibration_file` in `tianji_chest.yaml` and restart teleoperation. Recalibrate after changing tool geometry, Tracker mounting, or Home.
 
 > [!NOTE]
 >

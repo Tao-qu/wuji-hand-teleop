@@ -49,17 +49,17 @@ Visualization Manager:
         Value: true
       left_chest:
         Value: true
-      left_wrist:
+      left_hand_back:
         Value: true
       right_arm:
         Value: true
       right_chest:
         Value: true
-      right_wrist:
+      right_hand_back:
         Value: true
-      tianji_left:
+      left_tcp_target:
         Value: true
-      tianji_right:
+      right_tcp_target:
         Value: true
       world:
         Value: true
@@ -79,16 +79,16 @@ Visualization Manager:
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.4000000059604645
-    Name: Right Wrist Axes
+    Name: Right Hand Back Axes
     Radius: 0.029999999329447746
-    Reference Frame: right_wrist
+    Reference Frame: right_hand_back
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.4000000059604645
-    Name: Left Wrist Axes
+    Name: Left Hand Back Axes
     Radius: 0.029999999329447746
-    Reference Frame: left_wrist
+    Reference Frame: left_hand_back
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true
@@ -100,16 +100,16 @@ Visualization Manager:
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.30000001192092896
-    Name: Tianji Right
+    Name: Right TCP Target
     Radius: 0.02500000037252903
-    Reference Frame: tianji_right
+    Reference Frame: right_tcp_target
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.30000001192092896
-    Name: Tianji Left
+    Name: Left TCP Target
     Radius: 0.02500000037252903
-    Reference Frame: tianji_left
+    Reference Frame: left_tcp_target
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true
