@@ -13,7 +13,7 @@ from typing import Callable, List, Optional
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QPlainTextEdit, QMessageBox, QWidget, QSizePolicy, QScrollArea,
 )
 
@@ -268,6 +268,7 @@ class ScanSNDialog(QDialog):
     def __init__(self, parent=None, log_callback: Optional[LogCallback] = None):
         super().__init__(parent)
         self._log = log_callback or (lambda _msg: None)
+        self._closed = False
         self.setWindowTitle("Scan device SNs")
         # Portrait, wide enough for absolute local configuration
         # paths to render on one line, tall enough that 6 detected devices +
@@ -324,22 +325,29 @@ class ScanSNDialog(QDialog):
         self._results_signal.connect(self._on_results)
         # Start scanning after the first loading-page paint.
         self._scan_started = False
+        self._initial_scan_timer = QTimer(self)
+        self._initial_scan_timer.setSingleShot(True)
+        self._initial_scan_timer.timeout.connect(self._start_scan)
         self._install_loading_widget()
 
     def paintEvent(self, event):
         super().paintEvent(event)
         # Queue the scan once, after the loading frame reaches the compositor.
-        if self._scan_started:
+        if self._closed or self._scan_started:
             return
         self._scan_started = True
-        QTimer.singleShot(60, self._start_scan)
+        self._initial_scan_timer.start(60)
 
     def _start_scan(self) -> None:
+        if self._closed:
+            return
+        self._initial_scan_timer.stop()
+        self._scan_started = True
         self._status.setText("Scanning Wuji Hand 2 (Ethernet, read-only)...")
         self._rescan_btn.setEnabled(False)
         self._clear_results()
         self._install_loading_widget()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.setCursor(Qt.WaitCursor)
         # Synchronous repaint so the "please wait" loading page is actually on
         # screen before the worker starts. The SDK/Zenoh scan can hold the GIL
         # for seconds and starve the GUI, so processEvents alone isn't enough
@@ -374,6 +382,8 @@ class ScanSNDialog(QDialog):
         self._loading_timer.start(350)
 
     def _tick_loading(self) -> None:
+        if self._closed:
+            return
         self._loading_dots = (self._loading_dots + 1) % 4
         if self._loading_label is None:
             return
@@ -400,8 +410,9 @@ class ScanSNDialog(QDialog):
         self._loading_label = None
 
     def _on_results(self, hands: list) -> None:
-        self._loading_timer.stop()
-        QApplication.restoreOverrideCursor()
+        if self._closed:
+            return
+        self._finish_scan_ui()
         self._clear_results()
 
         self._status.setText(
@@ -560,8 +571,17 @@ class ScanSNDialog(QDialog):
             # Refresh "Currently saved" + tags without making the operator hit Rescan.
             self._start_scan()
 
+    def _finish_scan_ui(self) -> None:
+        self._initial_scan_timer.stop()
+        self._loading_timer.stop()
+        self.unsetCursor()
+
+    def done(self, result: int) -> None:
+        self._closed = True
+        self._finish_scan_ui()
+        super().done(result)
+
     def closeEvent(self, event) -> None:
-        if self._loading_timer.isActive():
-            self._loading_timer.stop()
-            QApplication.restoreOverrideCursor()
+        self._closed = True
+        self._finish_scan_ui()
         super().closeEvent(event)

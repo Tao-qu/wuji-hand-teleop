@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Shared UI components (sibling modules).
@@ -66,7 +67,7 @@ _LC_NAMES = {
 _LOCK_FILE = "/tmp/wuji_teleop_monitor.lock"
 
 # All three modes share a single backend entry point.
-_BACKEND_MATCH = "ros2 launch wuji_teleop_bringup"
+_BACKEND_MATCH = "ros2 launch wuji_teleop_bringup wuji_teleop.launch.py"
 LAUNCH_CONFIGS = {
     "Hands + Arms (MANUS + 5 Trackers)": ["wuji_teleop.launch.py", "enable_hand:=true", "enable_arm:=true"],
     "Hands only (MANUS)": ["wuji_teleop.launch.py", "enable_hand:=true", "enable_arm:=false"],
@@ -82,20 +83,29 @@ def _preset_waits_for_arm_lifecycle(preset):
 _LOGO_PATH = Path(__file__).resolve().parent.parent / "wuji.svg"
 
 
+@dataclass(eq=False)
+class _LaunchSession:
+    process: subprocess.Popen | None = None
+    pgid: int | None = None
+    cancelled: threading.Event = field(default_factory=threading.Event)
+    spawn_done: threading.Event = field(default_factory=threading.Event)
+    stop_failed: bool = False
+
+
 class TeleopLauncherUI(QMainWindow):
     """One-click Wuji teleop launcher."""
 
     _MAX_LOG_LINES = 5000
 
-    _state_signal = pyqtSignal(str)
-    _stop_finished_signal = pyqtSignal(bool, bool)
+    _launch_finished_signal = pyqtSignal(object)
+    _stop_finished_signal = pyqtSignal(object, bool, bool)
     _arm_lifecycle_signal = pyqtSignal(int)
     _hand_lifecycle_signal = pyqtSignal(str, str)
     _service_result_signal = pyqtSignal(str, bool, str)
 
     def __init__(self, ros_node=None):
         super().__init__()
-        self._process = None
+        self._session = None
         self._state = "stopped"
         self._start_time = None
         self._ros_node = ros_node
@@ -115,7 +125,7 @@ class TeleopLauncherUI(QMainWindow):
         self._enable_clients = {}
         self._waiting_for_arm_lifecycle = False
 
-        self._state_signal.connect(self._set_state)
+        self._launch_finished_signal.connect(self._on_launch_finished)
         self._stop_finished_signal.connect(self._on_stop_finished)
         self._arm_lifecycle_signal.connect(self._on_arm_lifecycle_main)
         self._hand_lifecycle_signal.connect(self._on_hand_lifecycle_main)
@@ -482,10 +492,7 @@ class TeleopLauncherUI(QMainWindow):
         self._arm_lifecycle_signal.emit(int(msg.data))
 
     def _on_arm_lifecycle_main(self, lc: int):
-        """Promote starting -> running once the controller stops being
-        in-flight. Any 'done' state releases the Stop gate, including the
-        failure ones — otherwise the operator can't recover when
-        _do_enable raises (e.g. move_to_init residual too large)."""
+        """Update arm status without completing a pending process stop."""
         prev = self._arm_lifecycle
         self._arm_lifecycle = lc
         if prev != lc:
@@ -576,7 +583,11 @@ class TeleopLauncherUI(QMainWindow):
         """Continuously check every selected driver, including after startup."""
         if self._state not in ('starting', 'ready', 'running', 'error'):
             return
-        if self._process is None or self._process.poll() is not None:
+        session = self._session
+        if session is None or session.stop_failed or not session.spawn_done.is_set():
+            return
+        if session.process is None or session.process.poll() is not None:
+            self._on_launch_finished(session)
             return
         args = LAUNCH_CONFIGS[self._preset_combo.currentText()]
         outcomes = []
@@ -667,89 +678,102 @@ class TeleopLauncherUI(QMainWindow):
         self._emit_output(f">>> Preset: {preset}")
         self._emit_output(">>> " + " ".join(LAUNCH_CONFIGS[preset]))
 
+        session = _LaunchSession()
+        self._session = session
+
         def _run():
             proc = None
             try:
-                proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, preexec_fn=os.setsid)
-                self._process = proc
-                self._emit_output(">>> Launch command issued; waiting for teleop to initialize...")
-
                 try:
-                    for line in iter(proc.stdout.readline, ''):
-                        if not line:
-                            break
-                        self._emit_output(line.rstrip())
+                    if session.cancelled.is_set():
+                        return
+                    proc = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, start_new_session=True)
+                    session.process = proc
+                    session.pgid = proc.pid
                 finally:
-                    # Always close the stdout pipe — avoids FD leaks.
-                    if proc and proc.stdout:
-                        proc.stdout.close()
-
+                    # Stop can now either cancel the pending start or own its group.
+                    session.spawn_done.set()
+                self._emit_output(">>> Launch command issued; waiting for teleop to initialize...")
+                for line in iter(proc.stdout.readline, ''):
+                    if not line:
+                        break
+                    self._emit_output(line.rstrip())
                 retcode = proc.wait()
-                if self._process is proc:
-                    self._process = None
                 self._emit_output(f"\n>>> Process exited (code: {retcode})")
-                self._state_signal.emit("stopped")
-            except Exception as e:
-                self._emit_output(f"\n>>> Error: {e}")
-                if proc and proc.stdout:
-                    try:
-                        proc.stdout.close()
-                    except Exception:
-                        pass
-                if self._process is proc:
-                    self._process = None
-                self._state_signal.emit("stopped")
+            except Exception as exc:
+                self._emit_output(f"\n>>> Launch error: {exc}")
+            finally:
+                if proc is not None and proc.stdout is not None:
+                    proc.stdout.close()
+                self._launch_finished_signal.emit(session)
 
         threading.Thread(target=_run, daemon=True, name="teleop-launch").start()
+
+    def _on_launch_finished(self, session):
+        if session is not self._session or self._stop_in_progress or session.stop_failed:
+            return
+        try:
+            alive = self._session_alive(session)
+        except Exception as exc:
+            self._emit_output(f">>> Could not inspect teleop processes: {exc}")
+            alive = True
+        if alive:
+            self._set_state("error")
+            self._status_label.setText("Teleop: launcher exited; stop remaining processes")
+        else:
+            self._session = None
+            self._set_state("stopped")
 
     def _on_stop(self):
         if self._state in ("stopped", "stopping"):
             return
-        if self._process is None and not self._find_backend_processes():
-            self._set_state("stopped")
-            return
-        self._start_async_stop(close_after=False,
-                               reason="Stopping teleop safely...")
+        self._start_async_stop(close_after=False, reason="Stopping teleop...")
 
     def _start_async_stop(self, close_after: bool, reason: str):
         if self._stop_in_progress:
             return
+        session = self._session
+        if session is None:
+            self._set_state("stopped")
+            if close_after:
+                self.close()
+            return
+        session.cancelled.set()
+        session.stop_failed = False
         self._stop_in_progress = True
         self._set_state("stopping")
         self._emit_output(f"\n>>> {reason}")
         self._emit_output(">>> Waiting for teleop to shut down (up to 30s)...")
 
         def _stop():
-            ok = self._graceful_stop_sync()
-            self._process = None
-            self._stop_finished_signal.emit(ok, close_after)
+            try:
+                session.spawn_done.wait()
+                ok = self._graceful_stop_sync(session)
+            except Exception as exc:
+                self._emit_output(f">>> Stop failed: {exc}")
+                ok = False
+            self._stop_finished_signal.emit(session, ok, close_after)
 
         threading.Thread(target=_stop, daemon=True, name="teleop-stop").start()
 
-    def _on_stop_finished(self, ok: bool, close_after: bool):
+    def _on_stop_finished(self, session, ok: bool, close_after: bool):
+        if session is not self._session:
+            return
         self._stop_in_progress = False
-        self._process = None
         if ok:
+            self._session = None
             self._emit_output(">>> Teleop stopped")
-            self._state_signal.emit("stopped")
+            self._set_state("stopped")
             if close_after:
                 self.close()
             return
 
-        # Residual processes — surface it but still drop to stopped so the
-        # operator can retry.
-        self._emit_output(">>> Stop incomplete: residual teleop processes remain; investigate manually")
-        self._state_signal.emit("stopped")
-        if close_after:
-            QMessageBox.warning(
-                self,
-                "Residual teleop processes",
-                "The teleop backend did not fully exit.\n\n"
-                "Stop it again and confirm the controllers are down.",
-            )
-            self.close()
+        session.stop_failed = True
+        self._emit_output(">>> Stop incomplete: retry Stop Teleop")
+        self._set_state("error")
+        self._status_label.setText("Teleop: stop incomplete — retry Stop Teleop")
 
     def _emit_output(self, text: str):
         with self._output_lock:
@@ -777,63 +801,51 @@ class TeleopLauncherUI(QMainWindow):
         h, m, s = elapsed // 3600, (elapsed % 3600) // 60, elapsed % 60
         self._uptime_label.setText(f"Uptime: {h:02d}:{m:02d}:{s:02d}")
 
-    def _graceful_stop_sync(self) -> bool:
-        pgids = set()
+    @staticmethod
+    def _session_alive(session) -> bool:
+        if session.pgid is None:
+            return False
+        # Reap our launcher; zombies do not have running code to stop.
+        if session.process is not None:
+            session.process.poll()
+        output = subprocess.check_output(
+            ["ps", "-eo", "pgid=,stat="], text=True,
+            stderr=subprocess.DEVNULL, timeout=2.0)
+        for line in output.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and int(fields[0]) == session.pgid:
+                if not fields[1].startswith(('Z', 'X')):
+                    return True
+        return False
 
-        proc = self._process
-        if proc is not None and proc.poll() is None:
-            try:
-                pgids.add(os.getpgid(proc.pid))
-            except (ProcessLookupError, OSError):
-                pass
-
-        for item in self._find_backend_processes():
-            pgids.add(item["pgid"])
-
-        if not pgids:
+    def _graceful_stop_sync(self, session) -> bool:
+        if not self._session_alive(session):
+            return True
+        pgid = session.pgid
+        self._emit_output(f">>> Sending SIGINT to teleop process group: {pgid}")
+        try:
+            os.killpg(pgid, signal.SIGINT)
+        except ProcessLookupError:
             return True
 
-        self._emit_output(
-            ">>> Sending SIGINT to teleop process groups: "
-            + ", ".join(str(pgid) for pgid in sorted(pgids)))
-        for pgid in sorted(pgids):
-            try:
-                os.killpg(pgid, signal.SIGINT)
-            except (ProcessLookupError, OSError):
-                pass
-
         deadline = time.monotonic() + 30.0
-        remaining = set(pgids)
-        while remaining and time.monotonic() < deadline:
-            alive = {item["pgid"] for item in self._find_backend_processes()}
-            remaining &= alive
-            if not remaining:
+        while time.monotonic() < deadline:
+            if not self._session_alive(session):
                 return True
             time.sleep(0.2)
 
-        self._emit_output(
-            ">>> Timed out (30s); sending SIGKILL to residual process groups: "
-            + ", ".join(str(pgid) for pgid in sorted(remaining)))
-        for pgid in sorted(remaining):
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except (ProcessLookupError, OSError):
-                pass
+        self._emit_output(f">>> Timed out (30s); sending SIGKILL to process group: {pgid}")
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            return True
 
         kill_deadline = time.monotonic() + 5.0
-        while remaining and time.monotonic() < kill_deadline:
-            alive = {item["pgid"] for item in self._find_backend_processes()}
-            remaining &= alive
-            if not remaining:
+        while time.monotonic() < kill_deadline:
+            if not self._session_alive(session):
                 return True
             time.sleep(0.2)
-
-        if remaining:
-            self._emit_output(
-                ">>> Warning: process groups still alive: "
-                + ", ".join(str(pgid) for pgid in sorted(remaining)))
-            return False
-        return True
+        return False
 
     def closeEvent(self, event):
         if self._stop_in_progress or self._state == "stopping":
