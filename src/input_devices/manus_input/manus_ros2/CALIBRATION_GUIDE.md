@@ -73,7 +73,7 @@ See [Local environment setup](../../../../docs/LOCAL_SETUP.md) for SDK libraries
 
 For each detected side, the publisher opens the selected file, checks that it is nonempty and reads it in full, then calls `CoreSdk_SetGloveCalibration`. It marks that side as loaded when the calibration result is `SetGloveCalibrationReturnCode_Success`. There is no 16 MiB file-size cap in the publisher.
 
-A failed load is logged and retried on subsequent publication ticks until it succeeds. Skeleton publication continues independently of calibration success. Once successful, loading is skipped for that side for the rest of the process lifetime. Restart the publisher after changing a file or its configured path. Rebuild when changing packaged calibration files so the installed copy is updated.
+A failed load is logged and retried on subsequent publication ticks until it succeeds. Skeleton publication continues independently of calibration success. Once successful, loading is skipped for that side for the rest of the process lifetime. Restart the publisher after changing a file or its configured path. An explicitly selected absolute source-file path needs no rebuild; rebuild to update packaged copies when using an install without symlinks.
 
 The publication timer repeats the latest cached skeleton, even when no new SDK callback arrives. The message stamp and sequence describe the callback that supplied the cache; they are not publication freshness checks. A running topic alone does not establish that a profile loaded successfully or that a new glove sample arrived. Check the publisher's calibration result message for the intended side.
 
@@ -93,13 +93,18 @@ The tool verifies the selected glove's side and paired state, prints the SDK cal
 To create a new profile:
 
 ```bash
-mkdir -p config/local_calibration
 ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
   --calibrate --robots-disabled \
-  --output "$PWD/config/local_calibration/right-new.mcal"
+  --output right-new.mcal
 ```
 
-The output must be a new absolute path whose parent directory exists. Existing files and symlinks are not overwritten. The tool does not import the publisher's configured profile before calibration.
+`--output` is required with `--calibrate`; there is no default filename. Supply only a filename, such as `right-new.mcal`, without a directory or absolute path. The tool resolves the installed bundled profile's symlink to find the fixed calibration directory. With `--symlink-install`, the example writes to:
+
+```text
+src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal
+```
+
+Existing files and symlinks are not overwritten. The tool does not import the publisher's configured profile before calibration.
 
 Follow the prompts in order:
 
@@ -111,7 +116,7 @@ Use the decimal ID printed by the tool in interactive confirmations, even if the
 
 After Start and before Finish, cancellation requests the SDK Stop operation and does not apply the result through Finish. Cancelling before Start performs no Stop call. Successful Finish applies and saves calibration in Core, then the tool exports the bytes to the new file with owner-only permissions. If export fails after Finish, Core has already applied the result; the tool reports that distinction.
 
-Set the matching `manus.left_calibration_file` or `manus.right_calibration_file` to the completed export before restarting the publisher. Otherwise startup reloads the previously configured profile. The calibration tool retains its own export-size limit of 16 MiB; this is separate from the publisher's file-loading behavior.
+Set the matching `manus.left_calibration_file` or `manus.right_calibration_file` to the completed export's absolute path printed by the tool, then restart the publisher. The loader is unchanged: use the absolute path even though the calibration CLI accepts only a filename. Otherwise startup reloads the previously configured profile. The calibration tool retains its own export-size limit of 16 MiB; this is separate from the publisher's file-loading behavior.
 
 ## Calibration load results
 

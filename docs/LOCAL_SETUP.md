@@ -81,7 +81,7 @@ The arm configuration contains:
 - `driver.tool_dynamics`: payload source and optional per-arm parameters, described below.
 - `controller.control_rate` and `controller.state_publish_rate`: command and feedback publication rates in Hz. `home_duration_sec` controls the Home trajectory duration; `handoff_hold_sec` and `handoff_ramp_sec` control the measured-pose hold and blend into Tracker following, all in seconds.
 - `openvr.tracker_serials`: `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, and `right_arm` serial numbers. `publish_rate_hz`, `publish_tf`, and `parent_frame` control Tracker publication.
-- `openvr.calibration_file`: the selected Tracker profile. A filename resolves in the `openvr_input` package's `calibration` directory; an absolute path is read directly.
+- `openvr.calibration_file`: the selected Tracker profile. A filename resolves through the installed bundled profile to the calibration directory (`src/input_devices/openvr_input/calibration` with `--symlink-install`); an absolute path is read directly.
 
 Keep `driver.tool_dynamics.source: controller` to reuse the cabinet's payload values. To supply measured payloads, set `source: configured` and provide separate `left` and `right` arrays of ten values:
 
@@ -101,7 +101,7 @@ The selected Tracker profile has three top-level fields:
 - `hand_back_to_tcp`: per-side quaternion `qx`, `qy`, `qz`, `qw` aligning the hand-back Tracker orientation with the target TCP orientation. This transform has zero translation.
 - `upper_arm_rotations`: `left_arm` and `right_arm` 3×3 rotations. Columns are calibrated axes in the raw Tracker frame; the Y column supplies the arm reference direction to IK.
 
-The raw `left_hand_back` and `right_hand_back` Tracker origins provide position directly, without a wrist offset. Their orientation-corrected target frames are `left_tcp_target` and `right_tcp_target`. The bundled profile is `src/input_devices/openvr_input/calibration/tracker-neutral.yaml`; runtime loads the selected profile directly. After changing tool transforms, Tracker mounting, or Home joint targets, [export a new neutral-pose profile](STEAMVR.md#neutral-pose-calibration), select it with `openvr.calibration_file`, and restart teleoperation. Home joint targets and controller settings remain independent of the tool geometry.
+The raw `left_hand_back` and `right_hand_back` Tracker origins provide position directly, without a wrist offset. Their orientation-corrected target frames are `left_tcp_target` and `right_tcp_target`. The bundled profile is `src/input_devices/openvr_input/calibration/tracker-neutral.yaml`; runtime loads the selected profile directly. After changing tool transforms, Tracker mounting, or Home joint targets, [export a new neutral-pose profile](STEAMVR.md#neutral-pose-calibration), select its filename with `openvr.calibration_file`, and restart teleoperation. A newly exported profile needs no rebuild. Home joint targets and controller settings remain independent of the tool geometry.
 
 The configuration tool manages only the hand and arm templates and never replaces an existing local file. `python3 tools/configure.py --check` reports missing local files without writing. Generate local configuration before building, so the files are installed into ROS share directories:
 

@@ -57,7 +57,7 @@ openvr:
   parent_frame: world
 ```
 
-The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `chest_mount`, `hand_back_to_tcp`, and `upper_arm_rotations`. A filename resolves inside the `openvr_input` package's `calibration` directory; an absolute path is read directly.
+The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `chest_mount`, `hand_back_to_tcp`, and `upper_arm_rotations`. A filename resolves in the calibration directory found through the installed bundled profile; with `--symlink-install`, this is `src/input_devices/openvr_input/calibration`. An absolute path is read directly.
 
 The raw `left_hand_back` and `right_hand_back` Tracker origins provide position directly. The profile's per-side `hand_back_to_tcp` quaternions rotate their axes into `left_tcp_target` and `right_tcp_target`, with zero translation. Robot flange-to-virtual-hand-back-TCP geometry belongs in `driver.tool_transforms.left/right`, in millimetres. The TCP axes are parallel to the flange axes, and the local Tianji IK applies this tool geometry once.
 
@@ -69,12 +69,14 @@ Set the arm Home joint positions, Tracker serials, and flange-to-TCP tool transf
 source tools/env.sh
 ros2 run openvr_input tracker_calibrate --inspect
 ros2 run openvr_input tracker_calibrate --calibrate \
-  --output "$PWD/src/input_devices/openvr_input/calibration/tracker-my-neutral.yaml"
+  --output tracker-hand-back.yaml
 ```
 
-Choose a new output filename in an existing directory. Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. Keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
+`--output` is required with `--calibrate` and accepts a filename only; there is no default filename. The fixed output directory is resolved through the installed bundled profile's symlink. With `--symlink-install`, the example saves to `src/input_devices/openvr_input/calibration/tracker-hand-back.yaml`. Existing files and symlinks are not overwritten.
 
-After saving, set `openvr.calibration_file` in `tianji_chest.yaml` to the exported file's absolute path and restart teleoperation. Profiles installed in the `openvr_input` package's `calibration` directory can be selected by filename. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing tool geometry, mounting, or the reference Home pose.
+Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. Keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
+
+After saving, set `openvr.calibration_file: tracker-hand-back.yaml` in `tianji_chest.yaml` and restart teleoperation. Filename selection resolves the same source directory, so the new profile is available immediately without rebuilding. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing tool geometry, mounting, or the reference Home pose.
 
 ## Verification and operation
 

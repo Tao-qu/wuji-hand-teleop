@@ -24,16 +24,40 @@ def read_config(path):
     return data
 
 
+def calibration_directory():
+    """Locate the package calibration directory, following source-install links."""
+    from ament_index_python.packages import get_package_share_directory
+
+    # Data files are linked individually by --symlink-install. Resolve a bundled
+    # file so new profiles go beside its source, not into the install directory.
+    bundled_profile = (
+        Path(get_package_share_directory("openvr_input"))
+        / "calibration" / "tracker-neutral.yaml"
+    )
+    return bundled_profile.resolve(strict=True).parent
+
+
 def calibration_path(arm_config):
-    """Resolve a bundled calibration filename or an absolute profile path."""
+    """Resolve a package calibration filename or an absolute profile path."""
     path = Path(arm_config["openvr"]["calibration_file"]).expanduser()
     if not path.is_absolute():
         if path.parent != Path(".") or not path.name:
             raise ValueError("calibration_file must be a filename or an absolute path")
-        from ament_index_python.packages import get_package_share_directory
-
-        path = Path(get_package_share_directory("openvr_input")) / "calibration" / path
+        path = calibration_directory() / path
     return path.resolve(strict=True)
+
+
+def calibration_output_path(filename):
+    """Resolve a new filename inside the fixed package calibration directory."""
+    if (
+        not filename
+        or filename in (".", "..")
+        or Path(filename).name != filename
+        or "/" in filename
+        or "\\" in filename
+    ):
+        raise ValueError("--output must be a filename, such as tracker-hand-back.yaml")
+    return calibration_directory() / filename
 
 
 def load_selected_profile(arm_config):

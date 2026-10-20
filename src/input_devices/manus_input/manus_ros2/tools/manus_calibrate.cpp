@@ -2,6 +2,7 @@
 // SDK connection is process-wide; only the explicitly verified glove is calibrated.
 #include "ManusSDK.h"
 #include "manus_skeleton_metadata.hpp"
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -111,7 +112,8 @@ struct Options {
 void usage() {
     std::cout << "Usage: manus_calibrate --glove-id <decimal|0xHEX> --side left|right [--inspect]\n"
         "       manus_calibrate --glove-id <ID> --side left|right --calibrate\n"
-        "         --robots-disabled --output /absolute/new-profile.mcal\n"
+        "         --robots-disabled --output new-profile.mcal\n"
+        "Output is a filename in the package calibration directory, not a path.\n"
         "Inspect is the default and never starts calibration. Stop other MANUS clients first.\n"
         "Calibrate requires interactive confirmation before each vendor step and before finish.\n";
 }
@@ -145,7 +147,13 @@ Options options(int argc, char** argv) {
     if (inspect && o.calibrate) throw std::runtime_error("Choose inspect or calibrate");
     if (o.calibrate) {
         if (!o.robots_disabled) throw std::runtime_error("Confirm robot motors are disabled with --robots-disabled");
-        if (o.output.empty() || !o.output.is_absolute()) throw std::runtime_error("--output must be an absolute new file path");
+        if (o.output.empty() || o.output.has_parent_path() || o.output == "." ||
+            o.output == ".." || o.output.string().find('\\') != std::string::npos)
+            throw std::runtime_error("--output must be a filename without directories");
+        const auto bundled_profile =
+            std::filesystem::path(ament_index_cpp::get_package_share_directory("manus_ros2")) /
+            "calibration" / "tpxLeftMetaglovePro.mcal";
+        o.output = std::filesystem::canonical(bundled_profile).parent_path() / o.output;
         struct stat info{};
         if (::lstat(o.output.c_str(), &info) == 0 || errno != ENOENT)
             throw std::runtime_error("Output already exists or cannot be inspected; refusing overwrite");
@@ -341,6 +349,7 @@ std::vector<GloveCalibrationStepData> read_steps(const SdkSession& sdk, const Co
 int run(const Options& o, const Console& console) {
     console.say("Selected glove %u (0x%08X), side=%s. Integrated Core may enumerate other gloves; all calibration operations target this ID only.\n",
         o.id, o.id, o.side == Side_Left ? "left" : "right");
+    if (o.calibrate) console.say("Output calibration: %s\n", o.output.c_str());
     SdkSession sdk(o, console);
     try {
         sdk.connect();

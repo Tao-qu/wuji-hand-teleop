@@ -28,15 +28,16 @@ Inspection is also the default when no mode is given. It prints the official ste
 To calibrate only the verified right glove and export a new file:
 
 ```bash
-mkdir -p config/local_calibration
 ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
   --calibrate --robots-disabled \
-  --output "$PWD/config/local_calibration/right-new.mcal"
+  --output right-new.mcal
 ```
 
-The output must be a new absolute path in an existing directory. The tool refuses to overwrite a file or symlink and never imports a previous profile. It first requires `start <decimal glove ID>`, then `step <index>` after the operator is ready for each SDK-provided pose, and finally `finish <decimal glove ID>`. Any other input or EOF cancels; after Start, cancellation requests the official Stop API and does not call Finish. Prompt input is interruptible: Ctrl-C or SIGTERM cancels while waiting for a confirmation, including an incomplete input line. StartStep is a blocking SDK call: an in-flight step must return before Stop is called. Keep following the displayed vendor instructions during each step.
+`--output` is required with `--calibrate` and accepts a filename only, not a directory or absolute path. There is no default filename. The tool resolves the installed bundled profile's symlink to find the calibration directory; with `--symlink-install`, it saves to `src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal`. It refuses to overwrite a file or symlink and never imports a previous profile.
 
-Finish applies and saves calibration in Core, then the tool exports its bytes to the new file with owner-only permissions. If export fails after Finish, the tool reports that Core already applied the result; it cannot undo that operation. Set `manus.right_calibration_file` (or `left_calibration_file`) to the successful export before restarting the publisher, otherwise the configured previous profile will be loaded again. The `--robots-disabled` option is an operator declaration; the calibration tool does not query or control robot motors.
+The tool first requires `start <decimal glove ID>`, then `step <index>` after the operator is ready for each SDK-provided pose, and finally `finish <decimal glove ID>`. Any other input or EOF cancels; after Start, cancellation requests the official Stop API and does not call Finish. Prompt input is interruptible: Ctrl-C or SIGTERM cancels while waiting for a confirmation, including an incomplete input line. StartStep is a blocking SDK call: an in-flight step must return before Stop is called. Keep following the displayed vendor instructions during each step.
+
+Finish applies and saves calibration in Core, then the tool exports its bytes to the new file with owner-only permissions. If export fails after Finish, the tool reports that Core already applied the result; it cannot undo that operation. Set `manus.right_calibration_file` (or `left_calibration_file`) to the completed export's absolute path printed by the tool, then restart the publisher. The publisher's path selection is unchanged; a filename alone does not select this export. The `--robots-disabled` option is an operator declaration; the calibration tool does not query or control robot motors.
 
 ## Input contract
 

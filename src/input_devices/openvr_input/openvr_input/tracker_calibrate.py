@@ -1,12 +1,12 @@
 """Interactive five-Tracker calibration for the configured Tianji arm Home."""
 
 import argparse
-from pathlib import Path
 import signal
 import time
 
 from .tracker_calibration_io import (
     calibration_path,
+    calibration_output_path,
     load_context,
     make_profile,
     save_profile,
@@ -32,8 +32,11 @@ def _parser():
                        help="show configured Trackers and Home (default)")
     modes.add_argument("--calibrate", action="store_true",
                        help="capture a neutral pose for 5 seconds and export a calibration")
-    parser.add_argument("--output", type=Path,
-                        help="new calibration YAML to export; its parent directory must exist")
+    parser.add_argument(
+        "--output", metavar="FILENAME",
+        help="new YAML filename in the project openvr_input/calibration directory "
+             "(for example, tracker-hand-back.yaml); paths are not accepted",
+    )
     return parser
 
 
@@ -103,7 +106,7 @@ def _capture_and_fit(context, output):
             profile = make_profile(result)
             path = save_profile(output, profile)
             print(f"Calibration exported to {path}")
-            print("Set openvr.calibration_file in the arm configuration to this profile, "
+            print(f"Set openvr.calibration_file in the arm configuration to {path.name}, "
                   "then restart teleoperation.")
             return 0
 
@@ -115,8 +118,6 @@ def main(argv=None):
         parser.error("--output is required with --calibrate")
     if args.output is not None and not args.calibrate:
         parser.error("--output requires --calibrate")
-    if args.output is not None:
-        args.output = args.output.expanduser()
     previous_sigterm = signal.signal(signal.SIGTERM, _interrupt)
     try:
         from tianji_output.configuration import arm_config_path, load_arm_config
@@ -126,12 +127,14 @@ def main(argv=None):
         print(f"Arm configuration: {config_path}")
         print(f"Selected calibration: {calibration_path(arm_config)}")
         if args.calibrate:
-            if args.output.exists() or args.output.is_symlink():
-                raise ValueError(f"Choose a new output file: {args.output}")
-            if not args.output.parent.is_dir():
-                raise ValueError(f"Output directory does not exist: {args.output.parent}")
+            output = calibration_output_path(args.output)
+            if output.exists() or output.is_symlink():
+                raise ValueError(f"Choose a new output filename: {output.name}")
+            if not output.parent.is_dir():
+                raise ValueError(f"Output directory does not exist: {output.parent}")
+            print(f"Output calibration: {output}")
             context = load_context(arm_config)
-            return _capture_and_fit(context, args.output)
+            return _capture_and_fit(context, output)
 
         from .tracker_capture import TrackerCapture
 
