@@ -2,9 +2,13 @@
 left_hand:
   serial_number: "YOUR_LEFT_HAND2_SERIAL"
   name: "left_hand"
+  # Radians; firmware order: thumb/index/middle/ring/pinky, four joints each.
+  home_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 right_hand:
   serial_number: "YOUR_RIGHT_HAND2_SERIAL"
   name: "right_hand"
+  # Radians; firmware order: thumb/index/middle/ring/pinky, four joints each.
+  home_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 driver:
   auto_enable: true

@@ -30,7 +30,7 @@ The fetch tool installs the pinned official model under `src/wuji-description`, 
 
 | Configuration | Purpose |
 | --- | --- |
-| `src/output_devices/wujihand_output/config/hand2.yaml` | Hand serials and namespaces, SDK/ROS rates, MIT gains, and MANUS parameters |
+| `src/output_devices/wujihand_output/config/hand2.yaml` | Hand serials and namespaces, Home joint positions, SDK/ROS rates, MIT gains, and MANUS parameters |
 | `src/input_devices/openvr_input/config/openvr_input.yaml` | Five Tracker serials and wrist mounting offset |
 | `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet IP, initial joint angles, tool dynamics source, and optional tool transforms |
 | `src/wuji_teleop_bringup/config/static_transforms.yaml` | Chest and wrist coordinate transforms |
@@ -97,6 +97,32 @@ ros2 run wuji_teleop_monitor brake
 # Optional desktop shortcuts
 bash src/wuji_teleop_monitor/install_desktop.sh
 ```
+
+## Return to Home
+
+In the monitor, stop the current session, select the hands + arms, hands-only, or arms-only preset, and click **Return Home**. This operation needs no MANUS gloves or Trackers. **Stop Home** ends the session; select **Start Teleop** to resume input following.
+
+The command-line script provides the same three modes and loads the project environment:
+
+```bash
+./tools/home.sh both       # Both hands and both arms (default)
+./tools/home.sh arms       # Both arms
+./tools/home.sh hands      # Both hands
+```
+
+Home reads `left_hand.home_joints` and `right_hand.home_joints` from `hand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros, the open-hand reset target used by the Wuji Hand 2 implementation in `tianji_tele`. Arm Home reads `init_joints.left` and `init_joints.right` from `tianji_chest.yaml`, in degrees.
+
+The operation publishes hand targets through the existing hand transport and driver. Arms use the existing position-mode initialization and `move_to_init` trajectory, then remain in position mode. The session keeps the configured targets active until **Stop Home** or Ctrl-C, which closes the devices through their existing shutdown methods. Normal teleoperation startup is unchanged.
+
+For direct ROS launch or a separate hand configuration:
+
+```bash
+source tools/env.sh
+ros2 launch wuji_teleop_bringup wuji_home.launch.py mode:=both
+./tools/home.sh hands hand_config:=/absolute/path/to/hand2.yaml
+```
+
+The monitor shows joint feedback, hand driver states, and the Home operation state. `ACTIVE` on `/wuji_home/state` means the hand targets are being published and the selected arm Home call has completed; it is not a hand-arrival measurement. Arm Home calls the SDK directly, so the monitor's ROS **Cmd Hz** column does not measure that trajectory's command rate.
 
 ## Preview inputs and targets
 

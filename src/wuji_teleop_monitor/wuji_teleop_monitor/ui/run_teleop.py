@@ -66,13 +66,17 @@ _LC_NAMES = {
 # Single-instance lock.
 _LOCK_FILE = "/tmp/wuji_teleop_monitor.lock"
 
-# All three modes share a single backend entry point.
-_BACKEND_MATCH = "ros2 launch wuji_teleop_bringup wuji_teleop.launch.py"
+# Each operation supports the same three device selections.
+_BACKEND_MATCHES = (
+    "ros2 launch wuji_teleop_bringup wuji_teleop.launch.py",
+    "ros2 launch wuji_teleop_bringup wuji_home.launch.py",
+)
 LAUNCH_CONFIGS = {
     "Hands + Arms (MANUS + 5 Trackers)": ["wuji_teleop.launch.py", "enable_hand:=true", "enable_arm:=true"],
     "Hands only (MANUS)": ["wuji_teleop.launch.py", "enable_hand:=true", "enable_arm:=false"],
     "Arms only (5 Trackers)": ["wuji_teleop.launch.py", "enable_hand:=false", "enable_arm:=true"],
 }
+HOME_MODES = dict(zip(LAUNCH_CONFIGS, ("both", "hands", "arms")))
 
 
 def _preset_waits_for_arm_lifecycle(preset):
@@ -85,6 +89,7 @@ _LOGO_PATH = Path(__file__).resolve().parent.parent / "wuji.svg"
 
 @dataclass(eq=False)
 class _LaunchSession:
+    operation: str = "teleop"
     process: subprocess.Popen | None = None
     pgid: int | None = None
     cancelled: threading.Event = field(default_factory=threading.Event)
@@ -101,6 +106,7 @@ class TeleopLauncherUI(QMainWindow):
     _stop_finished_signal = pyqtSignal(object, bool, bool)
     _arm_lifecycle_signal = pyqtSignal(int)
     _hand_lifecycle_signal = pyqtSignal(str, str)
+    _home_state_signal = pyqtSignal(str)
     _service_result_signal = pyqtSignal(str, bool, str)
 
     def __init__(self, ros_node=None):
@@ -119,6 +125,7 @@ class TeleopLauncherUI(QMainWindow):
         # means "no message yet" (the controller's TRANSIENT_LOCAL latch
         # hasn't reached us, or this preset doesn't have an arm controller).
         self._arm_lifecycle = None
+        self._home_state = ""
         self._hand_seen = {}
         self._hand_commands_seen = {}
         self._hand_lifecycle = {side: '' for side in ('left', 'right')}
@@ -129,6 +136,7 @@ class TeleopLauncherUI(QMainWindow):
         self._stop_finished_signal.connect(self._on_stop_finished)
         self._arm_lifecycle_signal.connect(self._on_arm_lifecycle_main)
         self._hand_lifecycle_signal.connect(self._on_hand_lifecycle_main)
+        self._home_state_signal.connect(self._on_home_state_main)
         self._service_result_signal.connect(self._on_service_result)
 
         self._init_ui()
@@ -197,6 +205,9 @@ class TeleopLauncherUI(QMainWindow):
             self._ros_node.create_subscription(
                 Int8, '/tianji_arm/lifecycle_state',
                 self._on_arm_lifecycle, _lc_qos)
+            self._ros_node.create_subscription(
+                String, '/wuji_home/state',
+                lambda msg: self._home_state_signal.emit(msg.data), _lc_qos)
             self._enable_clients['arms'] = self._ros_node.create_client(
                 SetBool, '/tianji_arm_controller/set_enabled')
 
@@ -331,7 +342,20 @@ class TeleopLauncherUI(QMainWindow):
             QPushButton:disabled { background-color: #555; color: #888; }
         """)
         self._start_btn.clicked.connect(self._on_start)
-        ctrl_layout.addWidget(self._start_btn)
+        start_row = QHBoxLayout()
+        start_row.addWidget(self._start_btn)
+        self._home_btn = QPushButton("Return Home")
+        self._home_btn.setFixedHeight(55)
+        self._home_btn.setFont(QFont("Arial", 14, QFont.Bold))
+        self._home_btn.setStyleSheet("""
+            QPushButton { background-color: #1565C0; color: white; border-radius: 8px; }
+            QPushButton:hover { background-color: #1976D2; }
+            QPushButton:disabled { background-color: #555; color: #888; }
+        """)
+        self._home_btn.setToolTip("Return the selected hands and/or arms to their configured Home positions")
+        self._home_btn.clicked.connect(self._on_home)
+        start_row.addWidget(self._home_btn)
+        ctrl_layout.addLayout(start_row)
 
         self._stop_btn = QPushButton("Stop Teleop")
         self._stop_btn.setFixedHeight(55)
@@ -500,7 +524,8 @@ class TeleopLauncherUI(QMainWindow):
                 f">>> tianji_arm/lifecycle_state: "
                 f"{_LC_NAMES.get(lc, str(lc))}"
             )
-        if (_preset_waits_for_arm_lifecycle(self._preset_combo.currentText())
+        if (not self._is_home_session()
+                and _preset_waits_for_arm_lifecycle(self._preset_combo.currentText())
                 and self._state in ("starting", "ready", "running", "error")):
             if lc in (_LC_ENABLE_FAILED, _LC_SDK_ERROR):
                 self._set_state("error")
@@ -508,6 +533,14 @@ class TeleopLauncherUI(QMainWindow):
                 self._poll_process_alive()
 
     # -------------------- State management --------------------
+
+    def _is_home_session(self):
+        return self._session is not None and self._session.operation == "home"
+
+    def _on_home_state_main(self, state):
+        if self._is_home_session():
+            self._home_state = state.strip().upper()
+            self._poll_process_alive()
 
     def _set_state(self, state: str):
         self._state = state
@@ -521,9 +554,19 @@ class TeleopLauncherUI(QMainWindow):
             "stopping":  ("Teleop: stopping...",    "#F57C00", False, False),
         }
         text, color, start_en, config_en = _states.get(state, _states["stopped"])
+        if self._is_home_session():
+            text = {
+                "starting": "Home: moving to configured positions...",
+                "ready": "Home: targets active — check device enable status",
+                "running": "Home: configured targets active",
+                "error": "Home: operation or device error — inspect logs",
+                "stopping": "Home: stopping...",
+            }.get(state, text)
         self._status_label.setText(text)
         self._status_label.setStyleSheet(f"color: {color};")
         self._start_btn.setEnabled(start_en)
+        self._home_btn.setEnabled(start_en)
+        self._stop_btn.setText("Stop Home" if self._is_home_session() else "Stop Teleop")
         self._stop_btn.setEnabled(state in ("starting", "ready", "running", "error"))
         self._preset_combo.setEnabled(config_en)
         self._scan_sns_btn.setEnabled(config_en and "enable_hand:=true" in LAUNCH_CONFIGS[self._preset_combo.currentText()])
@@ -566,7 +609,7 @@ class TeleopLauncherUI(QMainWindow):
 
         processes = []
         for line in output.splitlines():
-            if _BACKEND_MATCH not in line:
+            if not any(pattern in line for pattern in _BACKEND_MATCHES):
                 continue
             parts = line.strip().split(None, 2)
             if len(parts) < 3:
@@ -591,9 +634,15 @@ class TeleopLauncherUI(QMainWindow):
             return
         args = LAUNCH_CONFIGS[self._preset_combo.currentText()]
         outcomes = []
+        home = self._is_home_session()
+        home_outcome = {"MOVING": "waiting", "ACTIVE": "active", "ERROR": "error"}.get(self._home_state, "waiting")
+        if home:
+            outcomes.append(home_outcome)
         if "enable_arm:=true" in args:
             lc = self._arm_lifecycle
-            if lc == _LC_READY:
+            if home:
+                outcome = home_outcome
+            elif lc == _LC_READY:
                 outcome = 'active'
             elif lc == _LC_DISABLED:
                 outcome = 'ready'
@@ -602,7 +651,8 @@ class TeleopLauncherUI(QMainWindow):
             else:
                 outcome = 'waiting'
             outcomes.append(outcome)
-            self._chain_labels['arms'].setText(f'Arms: {_LC_NAMES.get(lc, "waiting for driver")}')
+            arm_status = (self._home_state or "waiting for Home") if home else _LC_NAMES.get(lc, "waiting for driver")
+            self._chain_labels['arms'].setText(f'Arms: {arm_status}')
             self._update_enable_buttons('arms')
         if "enable_hand:=true" in args:
             for side in ('left', 'right'):
@@ -633,8 +683,9 @@ class TeleopLauncherUI(QMainWindow):
 
     # -------------------- Launch --------------------
 
-    def _build_launch_cmd(self, preset: str) -> list:
-        args = LAUNCH_CONFIGS[preset]
+    def _build_launch_cmd(self, preset: str, operation: str = "teleop") -> list:
+        args = (["wuji_home.launch.py", f"mode:={HOME_MODES[preset]}"]
+                if operation == "home" else LAUNCH_CONFIGS[preset])
         # `ros2 launch <package> <launch_file> <args...>`
         # bash -c lets us pick up overlay setup files if the user happens
         # to have one sourced.
@@ -645,19 +696,25 @@ class TeleopLauncherUI(QMainWindow):
         return ["bash", "-c", launch_cmd]
 
     def _on_start(self):
+        self._start_operation("teleop")
+
+    def _on_home(self):
+        self._start_operation("home")
+
+    def _start_operation(self, operation):
         if self._state != "stopped":
             return
         existing = self._find_backend_processes()
         if existing:
             QMessageBox.warning(
-                self, "Teleop already running",
-                "An existing teleop launch was detected on this machine.\n\n"
+                self, "Session already running",
+                "An existing Teleop or Home launch was detected on this machine.\n\n"
                 "Stop the other instance first, then try again.",
             )
             return
 
         preset = self._preset_combo.currentText()
-        if _preset_waits_for_arm_lifecycle(preset):
+        if operation == "teleop" and _preset_waits_for_arm_lifecycle(preset):
             reply = QMessageBox.warning(
                 self, 'Start arms',
                 'The arms will move to their initial pose and enter impedance mode.\n'
@@ -668,18 +725,18 @@ class TeleopLauncherUI(QMainWindow):
         self._hand_seen.clear()
         self._hand_commands_seen.clear()
         self._hand_lifecycle = {side: '' for side in ('left', 'right')}
-        self._waiting_for_arm_lifecycle = _preset_waits_for_arm_lifecycle(preset)
+        self._waiting_for_arm_lifecycle = operation == "teleop" and _preset_waits_for_arm_lifecycle(preset)
         self._arm_lifecycle = None
-        cmd = self._build_launch_cmd(preset)
+        self._home_state = ""
+        cmd = self._build_launch_cmd(preset, operation)
 
+        session = _LaunchSession(operation=operation)
+        self._session = session
         self._set_state("starting")
         self._clear_output()
         self._launch_started_at = time.monotonic()
         self._emit_output(f">>> Preset: {preset}")
-        self._emit_output(">>> " + " ".join(LAUNCH_CONFIGS[preset]))
-
-        session = _LaunchSession()
-        self._session = session
+        self._emit_output(">>> " + cmd[-1])
 
         def _run():
             proc = None
@@ -695,7 +752,7 @@ class TeleopLauncherUI(QMainWindow):
                 finally:
                     # Stop can now either cancel the pending start or own its group.
                     session.spawn_done.set()
-                self._emit_output(">>> Launch command issued; waiting for teleop to initialize...")
+                self._emit_output(f">>> Launch command issued; waiting for {operation} to initialize...")
                 for line in iter(proc.stdout.readline, ''):
                     if not line:
                         break
@@ -709,7 +766,7 @@ class TeleopLauncherUI(QMainWindow):
                     proc.stdout.close()
                 self._launch_finished_signal.emit(session)
 
-        threading.Thread(target=_run, daemon=True, name="teleop-launch").start()
+        threading.Thread(target=_run, daemon=True, name=f"{operation}-launch").start()
 
     def _on_launch_finished(self, session):
         if session is not self._session or self._stop_in_progress or session.stop_failed:
@@ -717,11 +774,11 @@ class TeleopLauncherUI(QMainWindow):
         try:
             alive = self._session_alive(session)
         except Exception as exc:
-            self._emit_output(f">>> Could not inspect teleop processes: {exc}")
+            self._emit_output(f">>> Could not inspect session processes: {exc}")
             alive = True
         if alive:
             self._set_state("error")
-            self._status_label.setText("Teleop: launcher exited; stop remaining processes")
+            self._status_label.setText(f"{session.operation.title()}: launcher exited; stop remaining processes")
         else:
             self._session = None
             self._set_state("stopped")
@@ -729,7 +786,7 @@ class TeleopLauncherUI(QMainWindow):
     def _on_stop(self):
         if self._state in ("stopped", "stopping"):
             return
-        self._start_async_stop(close_after=False, reason="Stopping teleop...")
+        self._start_async_stop(close_after=False, reason="Stopping current session...")
 
     def _start_async_stop(self, close_after: bool, reason: str):
         if self._stop_in_progress:
@@ -745,7 +802,7 @@ class TeleopLauncherUI(QMainWindow):
         self._stop_in_progress = True
         self._set_state("stopping")
         self._emit_output(f"\n>>> {reason}")
-        self._emit_output(">>> Waiting for teleop to shut down (up to 30s)...")
+        self._emit_output(">>> Waiting for the session to shut down (up to 30s)...")
 
         def _stop():
             try:
@@ -764,16 +821,16 @@ class TeleopLauncherUI(QMainWindow):
         self._stop_in_progress = False
         if ok:
             self._session = None
-            self._emit_output(">>> Teleop stopped")
+            self._emit_output(f">>> {session.operation.title()} stopped")
             self._set_state("stopped")
             if close_after:
                 self.close()
             return
 
         session.stop_failed = True
-        self._emit_output(">>> Stop incomplete: retry Stop Teleop")
+        self._emit_output(">>> Stop incomplete: retry Stop")
         self._set_state("error")
-        self._status_label.setText("Teleop: stop incomplete — retry Stop Teleop")
+        self._status_label.setText(f"{session.operation.title()}: stop incomplete — retry Stop")
 
     def _emit_output(self, text: str):
         with self._output_lock:
@@ -822,7 +879,7 @@ class TeleopLauncherUI(QMainWindow):
         if not self._session_alive(session):
             return True
         pgid = session.pgid
-        self._emit_output(f">>> Sending SIGINT to teleop process group: {pgid}")
+        self._emit_output(f">>> Sending SIGINT to session process group: {pgid}")
         try:
             os.killpg(pgid, signal.SIGINT)
         except ProcessLookupError:
@@ -855,7 +912,7 @@ class TeleopLauncherUI(QMainWindow):
         if self._state != "stopped":
             reply = QMessageBox.question(
                 self, "Confirm exit",
-                "Teleop is still running.\n\n"
+                "The current session is still running.\n\n"
                 "Closing the window will stop it first.\n\n"
                 "Stop and exit?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -864,7 +921,7 @@ class TeleopLauncherUI(QMainWindow):
                 return
             self._start_async_stop(
                 close_after=True,
-                reason="Closing window: stopping teleop safely...")
+                reason="Closing window: stopping the current session...")
             event.ignore()
             return
 

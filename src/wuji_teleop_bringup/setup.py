@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'hand2_preview = wuji_teleop_bringup.hand2_preview:main',
+            'home_position = wuji_teleop_bringup.home_position:main',
         ],
     },
 )
