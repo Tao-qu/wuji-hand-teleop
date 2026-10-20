@@ -2,7 +2,7 @@
 
 The `wujihand2_ros2` package connects each configured hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Run one driver process per hand with its serial number and left/right namespace. The main [project README](../../../README.md) covers installation and launch commands.
 
-The package lives in `wujihand2_ros2/` under this directory. It contains the SDK driver, official retargeting wrapper, MANUS keypoint conversion, and ROS command interface. The outer `wujihand2_output` directory groups these files and is not a ROS package.
+The package lives in `wujihand2_ros2/` under this directory. It contains the SDK driver, official retargeting wrapper, MANUS keypoint conversion, and ROS command interface. The outer `wujihand2_output` directory groups these files and is not a ROS package. The sibling `wuji-description/` directory contains the pinned official model checkout; `hand2/hand2_2/body` provides the `wuji_hand2_2_description` ROS package.
 
 The driver executable is `wujihand2_driver`. Normal teleoperation and Home start it through the unified bringup entrypoint. Configuration is stored in `wujihand2_ros2/config/wujihand2.yaml`, generated from the adjacent template; the package installs it as `share/wujihand2_ros2/config/wujihand2.yaml`.
 

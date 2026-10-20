@@ -33,7 +33,7 @@ python3 -m pip install -r requirements.txt
 
 The environment inherits ROS and Qt packages. `requirements.txt` pins `wuji-sdk==2026.10.12`; the SDK contains the Hand 2 retargeting runtime, and its NumPy interface is used directly. No separate retargeting project is installed.
 
-`dependencies.lock.json` pins the official `wuji-description` revision. The fetch tool checks out only `hand2/hand2_2/body` under `src/wuji-description`, providing the `wuji_hand2_2_description` ROS package. It rejects changed revisions or dirty existing checkouts rather than resetting them. The rest of the driver is maintained in this repository under `src/output_devices/wujihand2_output/wujihand2_ros2`.
+`dependencies.lock.json` pins the official `wuji-description` revision. The fetch tool checks out only `hand2/hand2_2/body` under `src/output_devices/wujihand2_output/wuji-description`, providing the `wuji_hand2_2_description` ROS package. It rejects changed revisions or dirty existing checkouts rather than resetting them. The rest of the driver is maintained in this repository under `src/output_devices/wujihand2_output/wujihand2_ros2`.
 
 ## 3. SDK libraries and device access
 

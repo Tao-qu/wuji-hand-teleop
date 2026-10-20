@@ -3,6 +3,7 @@
     "url": "https://github.com/wuji-technology/wuji-description.git",
     "commit": "829c9aa27cb12c3a49d5b8d63c9869dd8f656702",
     "tag": "v2026.10.12",
-    "sparse_paths": ["hand2/hand2_2/body"]
+    "sparse_paths": ["hand2/hand2_2/body"],
+    "path": "src/output_devices/wujihand2_output/wuji-description"
   }
 }

@@ -55,7 +55,7 @@ def main():
             lock = json.loads((ROOT / "dependencies.lock.json").read_text())
             for name, spec in lock.items():
                 revision = subprocess.check_output(
-                    ["git", "-C", str(ROOT / "src" / name), "rev-parse", "HEAD"], text=True).strip()
+                    ["git", "-C", str(ROOT / spec["path"]), "rev-parse", "HEAD"], text=True).strip()
                 if revision != spec["commit"]:
                     raise ValueError(f"{name}: revision does not match lock file")
             print("OK locked model source revision")

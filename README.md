@@ -26,7 +26,7 @@ python3 tools/fetch_dependencies.py
 python3 tools/configure.py
 ```
 
-The fetch tool installs the pinned official model under `src/wuji-description`, using `hand2/hand2_2/body`. Python versions are pinned in [requirements.txt](requirements.txt); the model revision is recorded in [dependencies.lock.json](dependencies.lock.json). The configuration tool copies missing templates and preserves existing local settings. Configure devices before building with `--symlink-install`.
+The fetch tool installs the pinned official model under `src/output_devices/wujihand2_output/wuji-description`, using `hand2/hand2_2/body`. Python versions are pinned in [requirements.txt](requirements.txt); the model revision is recorded in [dependencies.lock.json](dependencies.lock.json). The configuration tool copies missing templates and preserves existing local settings. Configure devices before building with `--symlink-install`.
 
 | Configuration | Purpose |
 | --- | --- |
@@ -143,7 +143,7 @@ Each hand uses one persistent SDK retargeting session in its own controller proc
 | `src/input_devices/openvr_input/` | Five-Tracker acquisition and TF |
 | `src/controller/` | Per-hand input loops and arm lifecycle |
 | `src/output_devices/wujihand2_output/` | Hand 2 SDK/ROS adapter, official retargeting, and configuration |
-| `src/wuji-description/hand2/hand2_2/body/` | Pinned official model package |
+| `src/output_devices/wujihand2_output/wuji-description/hand2/hand2_2/body/` | Pinned official model package |
 | `src/output_devices/tianji_output/` | Tianji SDK/IK and tool parameters |
 | `src/wuji_teleop_bringup/` | Launch configuration, preview, and static transforms |
 | `src/wuji_teleop_monitor/` | Qt monitor and brake tool |

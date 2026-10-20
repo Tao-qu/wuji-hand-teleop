@@ -14,13 +14,14 @@ def run(*args, cwd=None):
 def main():
     lock = json.loads((ROOT / "dependencies.lock.json").read_text())
     for name, spec in lock.items():
-        path = ROOT / "src" / name
+        path = ROOT / spec["path"]
         if path.exists():
             if run("git", "rev-parse", "HEAD", cwd=path) != spec["commit"]:
                 raise SystemExit(f"{path}: revision differs from lock; inspect it before updating")
             if run("git", "status", "--porcelain", cwd=path):
                 raise SystemExit(f"{path}: local changes exist; inspect them before fetching")
         else:
+            path.parent.mkdir(parents=True, exist_ok=True)
             run("git", "clone", "--filter=blob:none", "--no-checkout", spec["url"], str(path))
             if spec.get("sparse_paths"):
                 run("git", "sparse-checkout", "init", "--cone", cwd=path)
