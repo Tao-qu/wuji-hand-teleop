@@ -1,11 +1,8 @@
-"""Read, export, and apply Tracker calibration without opening devices."""
+"""Read project configuration and export Tracker calibration."""
 
 from copy import deepcopy
-from io import StringIO
 import math
-import os
 from pathlib import Path
-import tempfile
 
 from ruamel.yaml import YAML
 
@@ -48,7 +45,7 @@ def _number(value, name):
 
 
 def validate_profile(profile):
-    """Check the data needed to write the existing configuration fields."""
+    """Check generated calibration fields before export."""
     if not isinstance(profile, dict) or profile.get("schema_version") != 1:
         raise ValueError("Expected a Tracker calibration with schema_version: 1")
     try:
@@ -111,75 +108,3 @@ def save_profile(path, profile):
     with path.open("x", encoding="utf-8") as stream:
         yaml.dump(profile, stream)
     return path
-
-
-def load_profile(path):
-    return validate_profile(read_config(path))
-
-
-def _merge_fields(target, source, keys):
-    for key in keys:
-        target[key] = deepcopy(source[key])
-
-
-def _stage_file(path, content):
-    fd, name = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(content)
-        os.chmod(temporary, path.stat().st_mode & 0o777)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    return temporary
-
-
-def apply_profile(profile, tracker_path, static_path):
-    """Update only calibration fields, preserving unrelated values and comments."""
-    validate_profile(profile)
-    tracker_path = Path(tracker_path).expanduser().resolve(strict=True)
-    static_path = Path(static_path).expanduser().resolve(strict=True)
-    if tracker_path == static_path:
-        raise ValueError("Tracker and static TF configurations must be different files")
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    with tracker_path.open(encoding="utf-8") as stream:
-        tracker = yaml.load(stream)
-    with static_path.open(encoding="utf-8") as stream:
-        static = yaml.load(stream)
-    calibration = profile["calibration"]
-    _merge_fields(static["chest_mount"]["shared"],
-                  calibration["chest_mount"]["shared"], ("x", "y", "z"))
-    for side in SIDES:
-        _merge_fields(static["chest_mount"][side],
-                      calibration["chest_mount"][side], CHEST_KEYS)
-        _merge_fields(static["wrist_to_tianji"][side],
-                      calibration["wrist_to_tianji"][side], WRIST_KEYS)
-    upper = tracker.setdefault("upper_arm_rotations", {})
-    _merge_fields(upper, calibration["upper_arm_rotations"], ("left_arm", "right_arm"))
-
-    # Render both documents before replacing either, without retaining temp files.
-    staged = []
-    originals = {path: path.read_bytes() for path in (static_path, tracker_path)}
-    applied = []
-    try:
-        for path, document in ((static_path, static), (tracker_path, tracker)):
-            text = StringIO()
-            yaml.dump(document, text)
-            staged.append((path, _stage_file(path, text.getvalue().encode("utf-8"))))
-        for path, temporary in staged:
-            os.replace(temporary, path)
-            applied.append(path)
-    except BaseException:
-        for path in reversed(applied):
-            rollback = _stage_file(path, originals[path])
-            try:
-                os.replace(rollback, path)
-            finally:
-                rollback.unlink(missing_ok=True)
-        raise
-    finally:
-        for _, temporary in staged:
-            temporary.unlink(missing_ok=True)
-    return static_path, tracker_path

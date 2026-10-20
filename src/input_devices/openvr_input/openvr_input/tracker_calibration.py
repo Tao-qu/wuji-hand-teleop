@@ -14,7 +14,7 @@ ARM_MIRROR = np.diag([1.0, -1.0, 1.0])
 
 def home_reference(context):
     """Calculate the configured Home TCP and upper-arm directions locally."""
-    # Importing this module, or applying an exported profile, needs no native SDK.
+    # Load the native SDK only when calculating the Home reference.
     from tianji_output._internal.fx_kine import Marvin_Kine
     from tianji_output.tool_parameters import tool_transform
 

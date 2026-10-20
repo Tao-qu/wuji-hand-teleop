@@ -6,23 +6,15 @@ import signal
 import time
 
 from .tracker_calibration_io import (
-    apply_profile,
     default_config,
     load_context,
-    load_profile,
     make_profile,
     read_config,
     save_profile,
 )
 
 
-def _positive_seconds(value):
-    import math
-
-    seconds = float(value)
-    if not math.isfinite(seconds) or seconds <= 0:
-        raise argparse.ArgumentTypeError("duration must be a positive number of seconds")
-    return seconds
+CAPTURE_SECONDS = 5.0
 
 
 def _interrupt(signum, frame):
@@ -33,25 +25,14 @@ def _parser():
     parser = argparse.ArgumentParser(
         description="Inspect or calibrate five Trackers against the configured arm Home.",
         epilog="Calibration reads OpenVR and local kinematics only. "
-               "Apply writes configuration; restart teleoperation to load it.",
+               "Copy exported calibration fields into the project configuration manually, "
+               "then restart teleoperation.",
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--inspect", action="store_true",
                        help="show configured Trackers and Home (default)")
     modes.add_argument("--calibrate", action="store_true",
-                       help="capture a neutral pose and export a calibration")
-    modes.add_argument("--apply", metavar="PROFILE", type=Path,
-                       help="apply a saved calibration to the existing YAML files")
-    parser.add_argument("--tracker-config", type=Path,
-                        help="OpenVR YAML (default: installed openvr_input/config/openvr_input.yaml)")
-    parser.add_argument("--tf-config", type=Path,
-                        help="existing static_transforms.yaml; required for calibration and apply")
-    parser.add_argument("--robot-config", type=Path,
-                        help="Tianji YAML (default: installed tianji_output/config/tianji_chest.yaml)")
-    parser.add_argument("--kinematics-config", type=Path,
-                        help="kinematics model (default: installed tianji_output/config/ccs_m6.MvKDCfg)")
-    parser.add_argument("--duration", type=_positive_seconds, default=5.0,
-                        help="capture duration in seconds (default: 5)")
+                       help="capture a neutral pose for 5 seconds and export a calibration")
     parser.add_argument("--output", type=Path,
                         help="new calibration YAML to export; its parent directory must exist")
     return parser
@@ -81,7 +62,7 @@ def _show_fit(result):
         )
 
 
-def _capture_and_fit(context, args):
+def _capture_and_fit(context, output):
     from .tracker_capture import TrackerCapture
     from .tracker_calibration import fit_calibration
 
@@ -98,8 +79,8 @@ def _capture_and_fit(context, args):
             for count in (3, 2, 1):
                 print(f"Starting in {count}...", flush=True)
                 time.sleep(1)
-            print(f"Capture started. Hold the pose for {args.duration:g} seconds.", flush=True)
-            samples, stats = session.capture(duration=args.duration)
+            print(f"Capture started. Hold the pose for {CAPTURE_SECONDS:g} seconds.", flush=True)
+            samples, stats = session.capture(duration=CAPTURE_SECONDS)
             print("Capture complete. You can relax.", flush=True)
             print(f"Synchronized valid frames: {stats['valid_frames']}/{stats['iterations']}")
             print("Invalid frames by role: " + ", ".join(
@@ -120,45 +101,37 @@ def _capture_and_fit(context, args):
             if choice == "cancel":
                 return 2
             profile = make_profile(result, context["tracker_config"])
-            path = save_profile(args.output, profile)
+            path = save_profile(output, profile)
             print(f"Calibration exported to {path}")
-            print("Use --apply with this profile and --tf-config to update the running configuration.")
+            print("Copy calibration.chest_mount and calibration.wrist_to_tianji into "
+                  "wuji_teleop_bringup/config/static_transforms.yaml.")
+            print("Copy calibration.upper_arm_rotations into "
+                  "openvr_input/config/openvr_input.yaml, then restart teleoperation.")
             return 0
 
 
 def main(argv=None):
     parser = _parser()
     args = parser.parse_args(argv)
-    if (args.calibrate or args.apply) and args.tf_config is None:
-        parser.error("--tf-config is required with --calibrate or --apply")
     if args.calibrate and args.output is None:
         parser.error("--output is required with --calibrate")
     if args.output is not None and not args.calibrate:
         parser.error("--output requires --calibrate")
-    for name in ("tracker_config", "tf_config", "robot_config", "kinematics_config", "output", "apply"):
-        value = getattr(args, name)
-        if value is not None:
-            setattr(args, name, value.expanduser())
+    if args.output is not None:
+        args.output = args.output.expanduser()
     previous_sigterm = signal.signal(signal.SIGTERM, _interrupt)
     try:
-        tracker_path = args.tracker_config or default_config("openvr_input", "openvr_input.yaml")
-        if args.apply:
-            profile = load_profile(args.apply)
-            paths = apply_profile(profile, tracker_path, args.tf_config)
-            for path in paths:
-                print(f"Updated calibration fields: {path}")
-            print("Restart teleoperation to load the applied calibration.")
-            return 0
-
-        robot_path = args.robot_config or default_config("tianji_output", "tianji_chest.yaml")
+        tracker_path = default_config("openvr_input", "openvr_input.yaml")
+        robot_path = default_config("tianji_output", "tianji_chest.yaml")
         if args.calibrate:
             if args.output.exists() or args.output.is_symlink():
                 raise ValueError(f"Choose a new output file: {args.output}")
             if not args.output.parent.is_dir():
                 raise ValueError(f"Output directory does not exist: {args.output.parent}")
-            kinematics_path = args.kinematics_config or default_config("tianji_output", "ccs_m6.MvKDCfg")
-            context = load_context(tracker_path, args.tf_config, robot_path, kinematics_path)
-            return _capture_and_fit(context, args)
+            static_path = default_config("wuji_teleop_bringup", "static_transforms.yaml")
+            kinematics_path = default_config("tianji_output", "ccs_m6.MvKDCfg")
+            context = load_context(tracker_path, static_path, robot_path, kinematics_path)
+            return _capture_and_fit(context, args.output)
 
         from .tracker_capture import TrackerCapture
 
