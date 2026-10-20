@@ -20,8 +20,6 @@ class HomePositionNode(Node):
     def __init__(self):
         super().__init__("home_position")
         self.declare_parameter("mode", "both")
-        self.declare_parameter("hand_config", "")
-        self.declare_parameter("arm_config", "")
         mode = str(self.get_parameter("mode").value)
         if mode not in ("both", "arms", "hands"):
             raise ValueError("mode must be both, arms, or hands")
@@ -43,9 +41,7 @@ class HomePositionNode(Node):
         if mode in ("both", "hands"):
             from wujihand_output._internal.hand_interface import WujiHand
 
-            hand_path = str(self.get_parameter("hand_config").value)
-            hand_config = load_yaml_config(
-                hand_path or resolve_config_path("wujihand_output", "hand2.yaml"))
+            hand_config = load_yaml_config(resolve_config_path("wujihand_output", "hand2.yaml"))
             command_rate = float(hand_config.get("controller", {}).get("control_rate", 120.0))
             for side in ("left", "right"):
                 config = hand_config[f"{side}_hand"]
@@ -56,8 +52,7 @@ class HomePositionNode(Node):
         if self._use_arms:
             from tianji_output.configuration import load_arm_config
 
-            self._arm_config = load_arm_config(
-                str(self.get_parameter("arm_config").value) or None)
+            self._arm_config = load_arm_config()
             state_rate = float(self._arm_config["controller"]["state_publish_rate"])
             for side in ("left", "right"):
                 self._arm_state_pubs[side] = self.create_publisher(

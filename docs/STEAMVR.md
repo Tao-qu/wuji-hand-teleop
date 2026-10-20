@@ -68,15 +68,14 @@ Set the arm Home joint positions, Tracker serials, and flange-to-TCP tool transf
 ```bash
 source tools/env.sh
 ros2 run openvr_input tracker_calibrate --inspect
-ros2 run openvr_input tracker_calibrate --calibrate \
-  --output tracker-hand-back.yaml
+ros2 run openvr_input tracker_calibrate --calibrate
 ```
 
-`--output` is required with `--calibrate` and accepts a filename only; there is no default filename. The fixed output directory is located from the package, independently of its profiles. With `--symlink-install`, the example saves to `src/input_devices/openvr_input/calibration/tracker-hand-back.yaml`. Existing files and symlinks are not overwritten.
+`--output` is optional and defaults to `tracker.yaml`. To use another filename, add `--output tracker-hand-back.yaml`; directory and absolute paths are not accepted. The fixed output directory is located from the package, independently of its profiles. With `--symlink-install`, the default output is `src/input_devices/openvr_input/calibration/tracker.yaml`; a regular install uses the package-share calibration directory. Choosing `save` replaces an existing file of the same name after the complete profile has been written. Cancelling leaves the existing file unchanged.
 
-Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. Keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
+Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. After the three-second countdown, keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
 
-After saving, set `openvr.calibration_file: tracker-hand-back.yaml` in `tianji_chest.yaml` and restart teleoperation. Filename selection resolves the same source directory, so the new profile is available immediately without rebuilding. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing tool geometry, mounting, or the reference Home pose.
+After saving, set `openvr.calibration_file: tracker.yaml` (or your chosen filename) in `tianji_chest.yaml` and restart teleoperation. Filename selection resolves the same source directory, so the new profile is available immediately without rebuilding. The exported profile is loaded directly; no fields need to be copied into other files. Recalibrate after changing tool geometry, mounting, or the reference Home pose.
 
 ## Verification and operation
 
@@ -90,9 +89,9 @@ ros2 run tf2_ros tf2_echo chest left_hand_back
 The standalone launch reads the same arm configuration and calibration profile as teleoperation. To select another arm configuration, add `arm_config:=/absolute/path/to/tianji_chest.yaml`. Confirm that all five TF frames follow the corresponding body segments correctly. Stop the standalone input process before starting the arm pipeline:
 
 ```bash
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false enable_rviz:=true
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-hand
 ```
 
-This launch automatically enables the arms and moves them to the configured initial pose before Tracker control. Pass `arm_auto_enable:=false` to enable them later through the GUI or ROS service.
+This command automatically enables the arms, moves them to the configured Home pose, and waits three seconds before Tracker control. Use the separate `wuji_preview.launch.py` entrypoint for RViz visualization.
 
 The arms use `left_tcp_target` and `right_tcp_target` poses relative to their respective chest frames, together with upper-arm directions, to compute IK. RViz labels the raw hand-back axes separately from the TCP target axes. Incorrect input configuration or mounting orientation can produce incorrect targets. Check RViz coordinate axes, the initial pose, and the emergency stop before the first run.

@@ -29,15 +29,14 @@ To calibrate only the verified right glove and export a new file:
 
 ```bash
 ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
-  --calibrate --robots-disabled \
-  --output right-new.mcal
+  --calibrate --robots-disabled
 ```
 
-`--output` is required with `--calibrate` and accepts a filename only, not a directory or absolute path. There is no default filename. With `--symlink-install`, the output directory is fixed at build time to the package's source calibration directory, so the example saves to `src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal`. A regular install uses the package-share calibration directory. Neither location depends on an existing profile. The tool refuses to overwrite a file or symlink and never imports a previous profile.
+`--output` is optional: `--side left` defaults to `LeftMetaglovePro.mcal`, and `--side right` defaults to `RightMetaglovePro.mcal`. Add `--output right-new.mcal` to choose another filename; directory and absolute paths are not accepted. With `--symlink-install`, the output directory is fixed at build time to `src/input_devices/manus_input/manus_ros2/calibration`; a regular install uses the package-share calibration directory. A successful export replaces an existing file of the same name. Cancellation or an incomplete export leaves the existing file unchanged. The tool never imports a previous profile.
 
 The tool first requires `start <decimal glove ID>`, then `step <index>` after the operator is ready for each SDK-provided pose, and finally `finish <decimal glove ID>`. Any other input or EOF cancels; after Start, cancellation requests the official Stop API and does not call Finish. Prompt input is interruptible: Ctrl-C or SIGTERM cancels while waiting for a confirmation, including an incomplete input line. StartStep is a blocking SDK call: an in-flight step must return before Stop is called. Keep following the displayed vendor instructions during each step.
 
-Finish applies and saves calibration in Core, then the tool exports its bytes to the new file with owner-only permissions. If export fails after Finish, the tool reports that Core already applied the result; it cannot undo that operation. Set `manus.right_calibration_file` (or `left_calibration_file`) to the completed export's absolute path printed by the tool, then restart the publisher. The publisher's path selection is unchanged; a filename alone does not select this export. The `--robots-disabled` option is an operator declaration; the calibration tool does not query or control robot motors.
+Finish applies and saves calibration in Core, then the tool exports its bytes to the selected file with owner-only permissions. If export fails after Finish, the tool reports that Core already applied the result; it cannot undo that operation. Set `manus.right_calibration_file` (or `left_calibration_file`) to the completed export's absolute path printed by the tool, then restart the publisher. The publisher's path selection is unchanged; a filename alone does not select this export. The `--robots-disabled` option is an operator declaration; the calibration tool does not query or control robot motors.
 
 ## Input contract
 
@@ -72,7 +71,7 @@ Run commands from the repository root:
 
 ```bash
 source tools/env.sh
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_arm:=false
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-arm
 # In another terminal after loading the environment:
 ros2 topic hz /manus_glove_0
 ros2 topic hz /manus_glove_1
@@ -80,7 +79,7 @@ ros2 topic hz /left_hand/joint_commands
 ros2 topic hz /right_hand/joint_commands
 ```
 
-This hands-only launch automatically enables the selected hands by default. `hand_side:=left` or `right` selects one hand. Use `hand_auto_enable:=false` when starting the hand drivers without automatic enable; the hand `set_enabled` services remain available. The default full launch also starts and automatically enables the arms.
+This hands-only command automatically enables both hands and starts following after the fixed three-second preparation interval. The hand `set_enabled` services remain available. Omitting `--disable-arm` also starts and automatically enables both arms.
 
 For MANUS input alone, without starting robot drivers:
 

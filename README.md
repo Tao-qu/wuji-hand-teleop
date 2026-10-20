@@ -7,7 +7,7 @@ A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. A pai
 | Mode | Input | Output |
 | --- | --- | --- |
 | Hands + arms | Two MANUS gloves and five Trackers | Two hands and two arms |
-| Hands only | MANUS gloves | Both hands or one selected hand |
+| Hands only | MANUS gloves | Both hands |
 | Arms only | Five Trackers | Two Tianji arms |
 | Preview | MANUS gloves and five Trackers | RViz hand targets and Tracker poses |
 
@@ -53,35 +53,26 @@ ros2 run wuji_teleop_monitor monitor
 
 Select a mode and click **Start Teleop**. **Hands and arms auto-enable by default.** The arms move to the configured home position, then enter impedance mode and follow Tracker targets. The hands follow MANUS targets. The GUI also provides individual enable/disable buttons, joint feedback, current readings, and command rates. **Scan SNs** discovers Hand 2 devices and saves serial numbers to the local configuration.
 
-The same launch file supports terminal operation:
+The launch file is also installed as an executable so all operation switches use `--` syntax:
 
 ```bash
 # Hands + arms
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py
 # Both hands only
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_arm:=false
-# Left hand only
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_arm:=false hand_side:=left
-# Arms only
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py enable_hand:=false
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-arm
+# Both arms only
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-hand
 ```
 
-| Argument | Default | Meaning |
+| Option | Default | Meaning |
 | --- | --- | --- |
-| `enable_hand` | `true` | Start MANUS, hand controllers, and hand drivers |
-| `enable_arm` | `true` | Start OpenVR, static transforms, and arm controller |
-| `hand_side` | `both` | Select `both`, `left`, or `right` |
-| `hand_auto_enable` | `true` | Enable each hand after connecting and configuring gains |
-| `arm_auto_enable` | `true` | Run arm initialization and start following |
-| `hand_config` | empty | Override the default local Hand 2 YAML path |
-| `arm_config` | empty | Override the default local Tianji arm YAML path |
-| `enable_rviz` | `false` | Show the Tracker visualization |
+| `--disable-hand` | Off | Omit both hands and MANUS |
+| `--disable-arm` | Off | Omit both arms and Trackers |
+| `--home` | Off | Return the selected devices Home, then exit |
 
-To start processes with automatic enable turned off:
+Use `--help` for usage. The two disable switches cannot be combined. Teleoperation and Home load the fixed local `hand2.yaml` and `tianji_chest.yaml`; automatic enable is always on. Teleoperation uses a fixed three-second preparation interval after arm Home, or after hand initialization in hands-only mode. In combined mode, the hands wait for the arms to become ready. RViz is available through the separate Preview entrypoint.
 
-```bash
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py hand_auto_enable:=false arm_auto_enable:=false
-```
+Use `ros2 run` for these switches: native `ros2 launch` expects `name:=value` arguments and cannot pass custom `--` options. The bare `ros2 launch wuji_teleop_bringup wuji_teleop.launch.py` command still starts the default hands + arms mode.
 
 Enable or disable individual chains through the GUI or ROS services:
 
@@ -106,26 +97,18 @@ bash src/wuji_teleop_monitor/install_desktop.sh
 
 In the monitor, stop the current session, select the hands + arms, hands-only, or arms-only preset, and click **Return Home**. This operation needs no MANUS gloves or Trackers. The session exits automatically after the Home motion; **Stop Home** interrupts it. Select **Start Teleop** to resume input following.
 
-The command-line script provides the same three modes and loads the project environment:
+Use the same executable with `--home`:
 
 ```bash
-./tools/home.sh both       # Both hands and both arms (default)
-./tools/home.sh arms       # Both arms
-./tools/home.sh hands      # Both hands
+source tools/env.sh
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --home
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --home --disable-hand  # Arms only
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --home --disable-arm   # Hands only
 ```
 
 Home reads `left_hand.home_joints` and `right_hand.home_joints` from `hand2.yaml`: 20 positions in radians, in firmware order (thumb, index, middle, ring, pinky; four joints each). Both hands default to all zeros. Arm Home reads `left_arm.home_joints` and `right_arm.home_joints` from `tianji_chest.yaml`, in degrees, with the trajectory duration set by `controller.home_duration_sec`.
 
 The operation publishes hand targets through the existing hand transport and driver. Arms use the existing position-mode initialization and `move_to_init` trajectory with no additional wait after the motion. Arms-only and combined sessions exit when the configured trajectory finishes (8 seconds by default); hands-only sessions publish Home targets for 8 seconds and then exit. Exit disables and closes the selected devices through their existing shutdown methods. Device initialization and shutdown add time outside the motion interval. **Stop Home** or Ctrl-C interrupts the session. Normal teleoperation startup is unchanged.
-
-For direct ROS launch or a separate hand configuration:
-
-```bash
-source tools/env.sh
-ros2 launch wuji_teleop_bringup wuji_home.launch.py mode:=both
-./tools/home.sh hands hand_config:=/absolute/path/to/hand2.yaml
-./tools/home.sh arms arm_config:=/absolute/path/to/tianji_chest.yaml
-```
 
 The monitor shows joint feedback, hand driver states, and the Home operation state. `ACTIVE` on `/wuji_home/state` means the hand targets are being published and the selected arm Home call has completed; it is not a hand-arrival measurement. Arm Home calls the SDK directly, so the monitor's ROS **Cmd Hz** column does not measure that trajectory's command rate.
 
@@ -138,7 +121,7 @@ ros2 launch wuji_teleop_bringup wuji_preview.launch.py
 
 This entrypoint starts MANUS with the bundled TPX profiles, the configured five Trackers, Hand 2 target models, and RViz. It uses `/preview/*` topics and does not start actuator drivers. The models show requested finger geometry; Tracker axes show the incoming poses. Labels show the last received input and targets. Close RViz or press Ctrl-C to stop. `start_inputs:=false` omits input readers, and `enable_rviz:=false` omits RViz.
 
-Teleoperation, Home, Preview, and the standalone OpenVR launch all accept `arm_config:=/absolute/path/to/tianji_chest.yaml`. Input launches resolve the Tracker settings and selected calibration profile from that file.
+Preview and the standalone OpenVR launch accept `arm_config:=/absolute/path/to/tianji_chest.yaml`. Teleoperation and Home always use the default local arm configuration. Input launches resolve the Tracker settings and selected calibration profile from the arm configuration.
 
 ## Data contracts and code layout
 

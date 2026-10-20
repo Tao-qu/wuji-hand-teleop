@@ -68,19 +68,22 @@ _LOCK_FILE = "/tmp/wuji_teleop_monitor.lock"
 
 # Each operation supports the same three device selections.
 _BACKEND_MATCHES = (
+    "ros2 run wuji_teleop_bringup wuji_teleop.launch.py",
     "ros2 launch wuji_teleop_bringup wuji_teleop.launch.py",
-    "ros2 launch wuji_teleop_bringup wuji_home.launch.py",
+    # ros2 run starts the installed script; direct source runs use launch/.
+    "/wuji_teleop_bringup/wuji_teleop.launch.py",
+    "/wuji_teleop_bringup/launch/wuji_teleop.launch.py",
 )
 LAUNCH_CONFIGS = {
-    "Hands + Arms (MANUS + 5 Trackers)": ["wuji_teleop.launch.py", "enable_hand:=true", "enable_arm:=true"],
-    "Hands only (MANUS)": ["wuji_teleop.launch.py", "enable_hand:=true", "enable_arm:=false"],
-    "Arms only (5 Trackers)": ["wuji_teleop.launch.py", "enable_hand:=false", "enable_arm:=true"],
+    "Hands + Arms (MANUS + 5 Trackers)": [],
+    "Hands only (MANUS)": ["--disable-arm"],
+    "Arms only (5 Trackers)": ["--disable-hand"],
 }
-HOME_MODES = dict(zip(LAUNCH_CONFIGS, ("both", "hands", "arms")))
 
 
 def _preset_waits_for_arm_lifecycle(preset):
-    return "enable_arm:=true" in LAUNCH_CONFIGS.get(preset, [])
+    args = LAUNCH_CONFIGS.get(preset)
+    return args is not None and "--disable-arm" not in args
 
 
 # Package logo (wuji.svg lives one level up from the ui/ subpackage).
@@ -426,11 +429,11 @@ class TeleopLauncherUI(QMainWindow):
 
     def _on_preset_changed(self, preset):
         args = LAUNCH_CONFIGS[preset]
-        self._joint_panel.set_mode(hands="enable_hand:=true" in args,
-                                   arms="enable_arm:=true" in args)
-        self._scan_sns_btn.setEnabled("enable_hand:=true" in args)
+        self._joint_panel.set_mode(hands="--disable-hand" not in args,
+                                   arms="--disable-arm" not in args)
+        self._scan_sns_btn.setEnabled("--disable-hand" not in args)
         for chain in self._chain_labels:
-            visible = ("enable_arm:=true" if chain == "arms" else "enable_hand:=true") in args
+            visible = ("--disable-arm" if chain == "arms" else "--disable-hand") not in args
             self._chain_labels[chain].setVisible(visible)
             self._enable_buttons[chain].setVisible(visible)
             self._disable_buttons[chain].setVisible(visible)
@@ -569,7 +572,7 @@ class TeleopLauncherUI(QMainWindow):
         self._stop_btn.setText("Stop Home" if self._is_home_session() else "Stop Teleop")
         self._stop_btn.setEnabled(state in ("starting", "ready", "running", "error"))
         self._preset_combo.setEnabled(config_en)
-        self._scan_sns_btn.setEnabled(config_en and "enable_hand:=true" in LAUNCH_CONFIGS[self._preset_combo.currentText()])
+        self._scan_sns_btn.setEnabled(config_en and "--disable-hand" not in LAUNCH_CONFIGS[self._preset_combo.currentText()])
         self._joint_panel.set_phase(state)
         if state in ('starting', 'stopping'):
             for chain in self._enable_buttons:
@@ -638,7 +641,7 @@ class TeleopLauncherUI(QMainWindow):
         home_outcome = {"MOVING": "waiting", "ACTIVE": "active", "ERROR": "error"}.get(self._home_state, "waiting")
         if home:
             outcomes.append(home_outcome)
-        if "enable_arm:=true" in args:
+        if "--disable-arm" not in args:
             lc = self._arm_lifecycle
             if home:
                 outcome = home_outcome
@@ -654,7 +657,7 @@ class TeleopLauncherUI(QMainWindow):
             arm_status = (self._home_state or "waiting for Home") if home else _LC_NAMES.get(lc, "waiting for driver")
             self._chain_labels['arms'].setText(f'Arms: {arm_status}')
             self._update_enable_buttons('arms')
-        if "enable_hand:=true" in args:
+        if "--disable-hand" not in args:
             for side in ('left', 'right'):
                 lifecycle = self._hand_lifecycle[side]
                 outcome = {'ACTIVE': 'active', 'READY': 'ready', 'STOPPED': 'ready',
@@ -684,15 +687,14 @@ class TeleopLauncherUI(QMainWindow):
     # -------------------- Launch --------------------
 
     def _build_launch_cmd(self, preset: str, operation: str = "teleop") -> list:
-        args = (["wuji_home.launch.py", f"mode:={HOME_MODES[preset]}"]
-                if operation == "home" else LAUNCH_CONFIGS[preset])
-        # `ros2 launch <package> <launch_file> <args...>`
+        args = list(LAUNCH_CONFIGS[preset])
+        if operation == "home":
+            args.append("--home")
+        # `ros2 run <package> wuji_teleop.launch.py <args...>`
         # bash -c lets us pick up overlay setup files if the user happens
         # to have one sourced.
-        ros2_args = " ".join(args)
-        launch_cmd = (
-            f"exec ros2 launch wuji_teleop_bringup {ros2_args}"
-        )
+        launch_cmd = " ".join(
+            ["exec", "ros2", "run", "wuji_teleop_bringup", "wuji_teleop.launch.py", *args])
         return ["bash", "-c", launch_cmd]
 
     def _on_start(self):

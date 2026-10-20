@@ -9,6 +9,7 @@
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -21,7 +22,6 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -112,14 +112,16 @@ struct Options {
 void usage() {
     std::cout << "Usage: manus_calibrate --glove-id <decimal|0xHEX> --side left|right [--inspect]\n"
         "       manus_calibrate --glove-id <ID> --side left|right --calibrate\n"
-        "         --robots-disabled --output new-profile.mcal\n"
+        "         --robots-disabled [--output profile.mcal]\n"
         "Output is a filename in the package calibration directory, not a path.\n"
+        "Defaults: LeftMetaglovePro.mcal / RightMetaglovePro.mcal for the selected side.\n"
+        "A successful export replaces an existing file of the same name.\n"
         "Inspect is the default and never starts calibration. Stop other MANUS clients first.\n"
         "Calibrate requires interactive confirmation before each vendor step and before finish.\n";
 }
 Options options(int argc, char** argv) {
     Options o;
-    bool got_id = false, got_side = false, inspect = false;
+    bool got_id = false, got_side = false, got_output = false, inspect = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto value = [&]() -> std::string {
@@ -140,13 +142,15 @@ Options options(int argc, char** argv) {
         } else if (arg == "--inspect") inspect = true;
         else if (arg == "--calibrate") o.calibrate = true;
         else if (arg == "--robots-disabled") o.robots_disabled = true;
-        else if (arg == "--output") o.output = value();
+        else if (arg == "--output") { o.output = value(); got_output = true; }
         else throw std::runtime_error("Unknown argument: " + arg);
     }
     if (!got_id || !got_side) throw std::runtime_error("Both --glove-id and --side are required; no automatic glove selection");
     if (inspect && o.calibrate) throw std::runtime_error("Choose inspect or calibrate");
     if (o.calibrate) {
         if (!o.robots_disabled) throw std::runtime_error("Confirm robot motors are disabled with --robots-disabled");
+        if (!got_output)
+            o.output = o.side == Side_Left ? "LeftMetaglovePro.mcal" : "RightMetaglovePro.mcal";
         if (o.output.empty() || o.output.has_parent_path() || o.output == "." ||
             o.output == ".." || o.output.string().find('\\') != std::string::npos)
             throw std::runtime_error("--output must be a filename without directories");
@@ -158,11 +162,8 @@ Options options(int argc, char** argv) {
             "calibration";
 #endif
         o.output = output_directory / o.output;
-        struct stat info{};
-        if (::lstat(o.output.c_str(), &info) == 0 || errno != ENOENT)
-            throw std::runtime_error("Output already exists or cannot be inspected; refusing overwrite");
         if (!std::filesystem::is_directory(o.output.parent_path())) throw std::runtime_error("Output parent directory must already exist");
-    } else if (!o.output.empty()) throw std::runtime_error("--output requires --calibrate");
+    } else if (got_output) throw std::runtime_error("--output requires --calibrate");
     return o;
 }
 
@@ -274,24 +275,33 @@ private:
 
 class NewProfile {
 public:
-    explicit NewProfile(const std::filesystem::path& path): path_(path) {
-        fd_ = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        if (fd_ < 0) throw std::runtime_error("Cannot reserve new output file; no calibration started");
-    }
-    ~NewProfile() { if (fd_ >= 0) ::close(fd_); if (!saved_) ::unlink(path_.c_str()); }
+    explicit NewProfile(const std::filesystem::path& path): path_(path) {}
+    ~NewProfile() { if (fd_ >= 0) ::close(fd_); if (!temporary_.empty()) ::unlink(temporary_.c_str()); }
     void save(const std::vector<unsigned char>& bytes) {
+        if (interrupted) throw std::runtime_error("Calibration export cancelled");
+        std::string temporary = (path_.parent_path() / ("." + path_.filename().string() + ".XXXXXX")).string();
+        fd_ = ::mkstemp(temporary.data());
+        if (fd_ < 0) throw std::runtime_error("Cannot create calibration export file");
+        temporary_ = temporary;
         size_t offset = 0;
         while (offset < bytes.size()) {
+            if (interrupted) throw std::runtime_error("Calibration export cancelled");
             const auto count = ::write(fd_, bytes.data() + offset, bytes.size() - offset);
             if (count < 0 && errno == EINTR) continue;
             if (count <= 0) throw std::runtime_error("Cannot write new calibration file");
             offset += static_cast<size_t>(count);
         }
         if (::fsync(fd_) != 0) throw std::runtime_error("Cannot sync new calibration file");
-        saved_ = true;
+        const int closed = ::close(fd_);
+        fd_ = -1;
+        if (closed != 0) throw std::runtime_error("Cannot close calibration export file");
+        if (interrupted) throw std::runtime_error("Calibration export cancelled");
+        if (::rename(temporary_.c_str(), path_.c_str()) != 0)
+            throw std::runtime_error("Cannot replace calibration file");
+        temporary_.clear();
     }
 private:
-    std::filesystem::path path_; int fd_ = -1; bool saved_ = false;
+    std::filesystem::path path_, temporary_; int fd_ = -1;
 };
 const char* chain_name(ChainType c) {
     switch(c) {
@@ -379,6 +389,7 @@ int run(const Options& o, const Console& console) {
         console.say("All steps accepted. The next confirmation applies the result and exports the new profile.\n");
         if (!console.confirm("finish " + std::to_string(o.id))) { sdk.cancel(); return 2; }
         sdk.finish();
+        if (interrupted) throw std::runtime_error("Calibration export cancelled");
         // GetSize prepares the SDK's shared export buffer: consume it immediately.
         uint32_t size = 0;
         check(CoreSdk_GetGloveCalibrationSize(o.id, &size), "GetGloveCalibrationSize");

@@ -45,7 +45,7 @@ manus:
   right_calibration_file: /absolute/path/to/right-profile.mcal
 ```
 
-Use `""` for either value to select that side's packaged TPX profile. The launch file passes this block to `manus_data_publisher`. `hand_side` selects robot hand controllers; it does not stop the MANUS publisher from handling both connected gloves.
+Use `""` for either value to select that side's packaged TPX profile. The launch file passes this block to `manus_data_publisher`. Normal hand teleoperation starts both robot hand controllers; the MANUS publisher handles both connected gloves.
 
 To run only the glove publisher with profile overrides, from the repository root:
 
@@ -94,17 +94,16 @@ To create a new profile:
 
 ```bash
 ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
-  --calibrate --robots-disabled \
-  --output right-new.mcal
+  --calibrate --robots-disabled
 ```
 
-`--output` is required with `--calibrate`; there is no default filename. Supply only a filename, such as `right-new.mcal`, without a directory or absolute path. The output directory is independent of any existing profile. With `--symlink-install`, it is fixed at build time to the package's source calibration directory, and the example writes to:
+`--output` is optional: the default is `LeftMetaglovePro.mcal` for `--side left`, or `RightMetaglovePro.mcal` for `--side right`. To choose another filename, add `--output right-new.mcal`, without a directory or absolute path. The output directory is independent of any existing profile. With `--symlink-install`, it is fixed at build time to the package's source calibration directory, and the example writes to:
 
 ```text
-src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal
+src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal
 ```
 
-A regular install uses the package-share calibration directory. Existing files and symlinks are not overwritten. The tool does not import the publisher's configured profile before calibration.
+A regular install uses the package-share calibration directory. Successful export replaces an existing file of the same name; cancellation or an incomplete export leaves the existing file unchanged. The tool does not import the publisher's configured profile before calibration.
 
 Follow the prompts in order:
 
@@ -114,7 +113,7 @@ Follow the prompts in order:
 
 Use the decimal ID printed by the tool in interactive confirmations, even if the command-line ID was hexadecimal. Any other prompt input or EOF cancels. Ctrl-C and SIGTERM also request cancellation, including while waiting for an incomplete input line. A blocking SDK step must return before cancellation can call Stop. A negative SDK step duration denotes a continuous step with an estimated duration.
 
-After Start and before Finish, cancellation requests the SDK Stop operation and does not apply the result through Finish. Cancelling before Start performs no Stop call. Successful Finish applies and saves calibration in Core, then the tool exports the bytes to the new file with owner-only permissions. If export fails after Finish, Core has already applied the result; the tool reports that distinction.
+After Start and before Finish, cancellation requests the SDK Stop operation and does not apply the result through Finish. Cancelling before Start performs no Stop call. Successful Finish applies and saves calibration in Core, then the tool exports the bytes to the selected file with owner-only permissions. If export fails after Finish, Core has already applied the result; the tool reports that distinction.
 
 Set the matching `manus.left_calibration_file` or `manus.right_calibration_file` to the completed export's absolute path printed by the tool, then restart the publisher. The loader is unchanged: use the absolute path even though the calibration CLI accepts only a filename. Otherwise startup reloads the previously configured profile. The calibration tool retains its own export-size limit of 16 MiB; this is separate from the publisher's file-loading behavior.
 

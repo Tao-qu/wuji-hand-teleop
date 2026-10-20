@@ -74,7 +74,7 @@ Fill in the two local files generated from templates: `src/output_devices/wujiha
 - `controller`: MANUS `control_rate` and `flip_y: false`. The publisher explicitly requests right-handed coordinates, so the controller preserves XYZ. Set `flip_y: true` only for a separately validated input convention; it reverses chirality and is not a wrist rotation.
 - `manus`: optional absolute `left_calibration_file` and `right_calibration_file` paths. Empty paths select the bundled TPX profiles.
 
-The default arm configuration and relative kinematics filenames are read from the package configuration directory: `src/output_devices/tianji_output/tianji_output/config` with `--symlink-install`, or the package-share `config` directory in a regular install. Directory lookup does not depend on individual configuration files. An explicit `arm_config` path overrides the default YAML.
+The default arm configuration and relative kinematics filenames are read from the package configuration directory: `src/output_devices/tianji_output/tianji_output/config` with `--symlink-install`, or the package-share `config` directory in a regular install. Directory lookup does not depend on individual configuration files. Preview and standalone OpenVR accept an explicit `arm_config` path; teleoperation and Home use the fixed default YAML.
 
 The arm configuration contains:
 
@@ -127,12 +127,12 @@ Normal launch starts both hand and arm pipelines and automatically enables their
 
 ```bash
 source tools/env.sh
-ros2 launch wuji_teleop_bringup wuji_teleop.launch.py
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py
 ```
 
-Use `enable_arm:=false` for hands only, or `enable_hand:=false` for arms only. `hand_side:=left` or `hand_side:=right` selects one hand. To control enabling through the GUI or ROS services instead of startup, pass `hand_auto_enable:=false` and/or `arm_auto_enable:=false`. The `hand_auto_enable` launch argument overrides the hand YAML's `auto_enable` value.
+Use `--disable-arm` for both hands only, or `--disable-hand` for both arms only. Add `--home` to return the selected devices Home and exit without input readers. Automatic enable is fixed on. Teleoperation waits three seconds after arm Home, or after hand initialization in hands-only mode; combined-mode hands wait for arm readiness. Use `--help` to list the three operation switches.
 
-Teleoperation, Home, Preview, and the standalone OpenVR launch accept `arm_config:=/absolute/path/to/tianji_chest.yaml`. Leaving it empty selects the local arm configuration installed in the `tianji_output` package.
+Teleoperation and Home load the fixed local `hand2.yaml` and `tianji_chest.yaml`. Preview and the standalone OpenVR launch still accept `arm_config:=/absolute/path/to/tianji_chest.yaml`; leaving it empty selects the local arm configuration installed in the `tianji_output` package. Use `ros2 run` for the teleoperation/Home switches because native `ros2 launch` expects `name:=value` arguments.
 
 The hand bridge sets MIT gains and sends the latest 20-joint target through the official SDK. The SDK and hand firmware manage motor control; the project does not configure a current limit or add command timeout, ramp, or joint-limit interlocks. The GUI displays feedback and diagnostics and provides Enable/Disable buttons. The hand driver also exposes SDK emergency-stop and clear-fault operations as ROS services. See the [README](../README.md) for launch options and services.
 
@@ -146,7 +146,7 @@ The hand bridge sets MIT gains and sends the latest 20-joint target through the 
 | Model package or configuration not found | Fetch dependencies, generate configuration, build, and source again |
 | Hand not discovered | Check the configured SN, network links/routes, and discovery visibility |
 | Hand SDK operation fails | Inspect the driver log and per-joint diagnostics for the SDK result |
-| Hand remains STOPPED | Check `hand_auto_enable`; use the GUI or `set_enabled` service if automatic enabling was disabled |
+| Hand remains STOPPED | Inspect driver diagnostics and use the GUI Enable button or `set_enabled` service |
 | No MANUS skeleton data | Check receiver permissions, SDK licensing, calibration file paths, and publisher logs |
 | SteamVR fails | Run it in the same graphical session and confirm all five Trackers |
 | Cabinet connection fails | Check the configured IP, routes, emergency stop, and competing SDK processes |

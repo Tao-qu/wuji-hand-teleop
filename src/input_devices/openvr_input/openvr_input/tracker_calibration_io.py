@@ -3,6 +3,7 @@
 from copy import deepcopy
 import math
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
@@ -46,7 +47,7 @@ def calibration_path(arm_config):
 
 
 def calibration_output_path(filename):
-    """Resolve a new filename inside the fixed package calibration directory."""
+    """Resolve an output filename inside the fixed package calibration directory."""
     if (
         not filename
         or filename in (".", "..")
@@ -137,13 +138,23 @@ def _flow_vectors(value):
 
 
 def save_profile(path, profile):
-    """Export a new profile at the explicitly selected path."""
+    """Replace the selected profile after its complete YAML has been written."""
     validate_profile(profile)
     path = Path(path).expanduser().absolute()
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.indent(mapping=2, sequence=4, offset=2)
     yaml.width = 4096
-    with path.open("x", encoding="utf-8") as stream:
-        yaml.dump(_flow_vectors(profile), stream)
+    temporary = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            yaml.dump(_flow_vectors(profile), stream)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path
