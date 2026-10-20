@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <deque>
+#include <set>
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/header.hpp"
@@ -154,6 +155,10 @@ protected:
     std::vector<GestureLandscapeData> m_NewGestureLandscapeData;
     std::vector<GestureLandscapeData> m_GestureLandscapeData;
     
+    // Used only by the publish timer, not by SDK callbacks.
+    bool m_LandscapeWaitShown = false;
+    std::set<uint32_t> m_FirstFrameWaitShown;
+
     // MANUS message publishers
     rclcpp::TimerBase::SharedPtr m_PublishTimer;
     

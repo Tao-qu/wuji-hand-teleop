@@ -7,6 +7,7 @@ import math
 import logging
 from pathlib import Path
 from .robot_structures import *
+from .native_ik_output import call_with_filtered_stdout
 
 # Configure log system
 logging.basicConfig(format='%(message)s')
@@ -156,7 +157,8 @@ class Marvin_Kine:
 
         # Call function
 
-        success = self.kine.LOADMvCfg(
+        success = call_with_filtered_stdout(
+            self.kine.LOADMvCfg,
             config_path.encode('utf-8'),
             ctypes.byref(TYPE),
             ctypes.byref(GRV),
@@ -247,19 +249,19 @@ class Marvin_Kine:
         ''' ini type'''
         self.kine.FX_Robot_Init_Type.argtypes = [c_long, c_long]
         self.kine.FX_Robot_Init_Type.restype = c_bool
-        success1 = self.kine.FX_Robot_Init_Type(Serial, robot_type_)
+        success1 = call_with_filtered_stdout(self.kine.FX_Robot_Init_Type, Serial, robot_type_)
 
         ''' ini dh'''
         # FX_BOOL  FX_Robot_Init_Kine(FX_INT32L RobotSerial, FX_DOUBLE DH[8][4]);
         self.kine.FX_Robot_Init_Kine.argtypes = [c_long, (c_double * 4) * 8]
         self.kine.FX_Robot_Init_Kine.restype = c_bool
-        success2 = self.kine.FX_Robot_Init_Kine(Serial, DH)
+        success2 = call_with_filtered_stdout(self.kine.FX_Robot_Init_Kine, Serial, DH)
 
         ''' ini Lmt'''
         # FX_BOOL  FX_Robot_Init_Lmt(FX_INT32L RobotSerial, FX_DOUBLE PNVA[7][4], FX_DOUBLE J67[4][3]);
         self.kine.FX_Robot_Init_Lmt.argtypes = [c_long, (c_double * 4) * 7, (c_double * 3) * 4]
         self.kine.FX_Robot_Init_Lmt.restype = c_bool
-        success3 = self.kine.FX_Robot_Init_Lmt(Serial, PNVA, J67)
+        success3 = call_with_filtered_stdout(self.kine.FX_Robot_Init_Lmt, Serial, PNVA, J67)
 
         # print(success1,success2,success3)
         if success1 and success2 and success3:
@@ -301,7 +303,7 @@ class Marvin_Kine:
         '''set tool'''
         self.kine.FX_Robot_Tool_Set.argtypes = [c_long, (c_double * 4) * 4]
         self.kine.FX_Robot_Tool_Set.restype = c_bool
-        success1 = self.kine.FX_Robot_Tool_Set(Serial, TOOL)
+        success1 = call_with_filtered_stdout(self.kine.FX_Robot_Tool_Set, Serial, TOOL)
         if success1:
             logger.info('set tool kinematics info successful')
             return True
@@ -430,7 +432,7 @@ class Marvin_Kine:
         # Call inverse kinematics function
         self.kine.FX_Robot_Kine_IK.argtypes = [c_long, POINTER(FX_InvKineSolvePara)]
         self.kine.FX_Robot_Kine_IK.restype = c_bool
-        success = self.kine.FX_Robot_Kine_IK(Serial, byref(self.sp))
+        success = call_with_filtered_stdout(self.kine.FX_Robot_Kine_IK, Serial, byref(self.sp))
         if not success:
             logger.warning("Robot Inverse Kinematics Error")
             return False
@@ -500,7 +502,7 @@ class Marvin_Kine:
 
         self.kine.FX_Robot_Kine_IK_NSP.argtypes = [c_long, POINTER(FX_InvKineSolvePara)]
         self.kine.FX_Robot_Kine_IK_NSP.restype = c_bool
-        success = self.kine.FX_Robot_Kine_IK_NSP(Serial, byref(self.sp))
+        success = call_with_filtered_stdout(self.kine.FX_Robot_Kine_IK_NSP, Serial, byref(self.sp))
         if not success:
             logger.error("Robot Inverse Kinematics NSP Error")
             return False

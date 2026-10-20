@@ -9,13 +9,11 @@ from typing import Optional
 
 import numpy as np
 import rclpy
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
     QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy,
 )
 from rclpy.utilities import remove_ros_args
-from rclpy._rclpy_pybind11 import RCLError
 from tf2_ros import Buffer, TransformListener
 import tf2_ros
 from scipy.spatial.transform import Rotation as R
@@ -30,6 +28,7 @@ from .common import (
     get_default_qos,
     load_yaml_config,
     get_package_config_path,
+    run_ros_node,
 )
 
 
@@ -63,6 +62,7 @@ class TianjiArmControllerNode(Node):
 
         # Auto-enable uses a one-shot timer after node construction.
         self.declare_parameter('auto_enable', True)
+        self.declare_parameter('startup_wait_sec', 3.0)
         # Independent rates for TF -> IK control and joint-state publication.
         self.declare_parameter('control_rate', 120.0)
         self.declare_parameter('state_publish_rate', 500.0)
@@ -70,6 +70,7 @@ class TianjiArmControllerNode(Node):
         self.declare_parameter('handoff_hold_sec', 0.5)
         self.declare_parameter('handoff_ramp_sec', 1.0)
         auto_enable = bool(self.get_parameter('auto_enable').value)
+        self._startup_wait_sec = float(self.get_parameter('startup_wait_sec').value)
         self._control_rate_hz = float(self.get_parameter('control_rate').value)
         self._state_publish_rate_hz = float(self.get_parameter('state_publish_rate').value)
         self._handoff_hold_sec = max(0.0, float(self.get_parameter('handoff_hold_sec').value))
@@ -214,7 +215,11 @@ class TianjiArmControllerNode(Node):
             self._publish_lifecycle(LIFECYCLE_ENABLING)
             # Position-mode initialization precedes the impedance handoff.
             self.controller.set_position_mode(velRatio=100, AccRatio=100)
-            result = self.controller.move_to_init(wait=True, timeout=15, duration=8.0)
+            self.get_logger().info(
+                f"Moving arms Home over 8 seconds; following starts after "
+                f"{self._startup_wait_sec:g} seconds of preparation")
+            result = self.controller.move_to_init(
+                wait=True, timeout=self._startup_wait_sec, duration=8.0)
             if result is False:
                 self.get_logger().error("move_to_init failed or timed out")
                 raise RuntimeError("move_to_init failed")
@@ -284,6 +289,7 @@ class TianjiArmControllerNode(Node):
                 left_s, right_s = -1, -1
             if left_s == 3 and right_s == 3:
                 self._arm_enabled = True
+                self._publish_lifecycle(LIFECYCLE_READY)
                 response.success = True
                 response.message = "Already enabled (hardware in state=3)"
                 return response
@@ -672,28 +678,9 @@ def main(argv: Optional[list[str]] = None):
     config_path = args.config or get_package_config_path("tianji_output", "tianji_chest.yaml")
     config = load_yaml_config(config_path)
 
-    rclpy.init(args=raw_argv)
-    node = None
-    try:
-        node = TianjiArmControllerNode(robot_ip=config.get("robot_ip", "192.168.1.190"))
-        rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException, RCLError):
-        # Complete shutdown when execution or the ROS context is interrupted.
-        pass
-    finally:
-        if node is not None:
-            try:
-                node.shutdown()
-            except Exception as e:
-                print(f"shutdown() raised: {e}", file=sys.stderr)
-            try:
-                node.destroy_node()
-            except Exception:
-                pass
-        try:
-            rclpy.shutdown()
-        except Exception:
-            pass
+    run_ros_node(
+        lambda: TianjiArmControllerNode(robot_ip=config.get("robot_ip", "192.168.1.190")),
+        args=raw_argv)
 
 
 if __name__ == "__main__":

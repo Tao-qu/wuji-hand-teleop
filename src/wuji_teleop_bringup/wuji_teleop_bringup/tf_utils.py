@@ -33,14 +33,21 @@ def create_chest_tf_nodes(config: dict = None, sides: list = None) -> list:
     for side in sides:
         s = chest[side]
         # Layer 1: chest -> {side}_chest_base
+        # The legacy CLI read the YAML roll/pitch/yaw values as yaw/pitch/roll.
+        # Preserve that effective rotation and the existing Home calibration.
         nodes.append(Node(
             package="tf2_ros",
             executable="static_transform_publisher",
             name=f"{side}_chest_base_tf",
             arguments=[
-                str(shared["x"]), str(shared["y"]), str(shared["z"]),
-                str(s["roll"]), str(s["pitch"]), str(s["yaw"]),
-                "chest", f"{side}_chest_base"
+                "--x", str(shared["x"]),
+                "--y", str(shared["y"]),
+                "--z", str(shared["z"]),
+                "--yaw", str(s["roll"]),
+                "--pitch", str(s["pitch"]),
+                "--roll", str(s["yaw"]),
+                "--frame-id", "chest",
+                "--child-frame-id", f"{side}_chest_base",
             ],
         ))
         # Layer 2: {side}_chest_base -> {side}_chest
@@ -49,9 +56,12 @@ def create_chest_tf_nodes(config: dict = None, sides: list = None) -> list:
             executable="static_transform_publisher",
             name=f"{side}_chest_tf",
             arguments=[
-                str(s["local_x"]), str(s["local_y"]), str(s["local_z"]),
-                "0", "0", "0",
-                f"{side}_chest_base", f"{side}_chest"
+                "--x", str(s["local_x"]),
+                "--y", str(s["local_y"]),
+                "--z", str(s["local_z"]),
+                "--yaw", "0", "--pitch", "0", "--roll", "0",
+                "--frame-id", f"{side}_chest_base",
+                "--child-frame-id", f"{side}_chest",
             ],
         ))
 
@@ -75,9 +85,15 @@ def create_tianji_tf_nodes(config: dict = None, sides: list = None) -> list:
             executable="static_transform_publisher",
             name=f"tianji_{side}_tf",
             arguments=[
-                str(t["x"]), str(t["y"]), str(t["z"]),
-                str(t["qx"]), str(t["qy"]), str(t["qz"]), str(t["qw"]),
-                f"{side}_wrist", f"tianji_{side}"
+                "--x", str(t["x"]),
+                "--y", str(t["y"]),
+                "--z", str(t["z"]),
+                "--qx", str(t["qx"]),
+                "--qy", str(t["qy"]),
+                "--qz", str(t["qz"]),
+                "--qw", str(t["qw"]),
+                "--frame-id", f"{side}_wrist",
+                "--child-frame-id", f"tianji_{side}",
             ],
         ))
 

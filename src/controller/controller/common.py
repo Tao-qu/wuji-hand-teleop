@@ -11,10 +11,55 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+import signal
 from typing import Dict, Any, Optional
 
+import rclpy
 import yaml
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
+from rclpy.signals import SignalHandlerOptions
+
+
+def run_ros_node(factory, args=None):
+    """Stop callbacks and release hardware before closing the ROS context."""
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    executor = SingleThreadedExecutor()
+    stopping = False
+    initializing = True
+
+    def interrupt(signum, frame):
+        nonlocal stopping
+        if not stopping:
+            stopping = True
+            # Let construction return its resources before cleanup takes over.
+            if not initializing:
+                raise KeyboardInterrupt
+
+    previous = {sig: signal.signal(sig, interrupt)
+                for sig in (signal.SIGINT, signal.SIGTERM)}
+    node = None
+    try:
+        node = factory()
+        initializing = False
+        if not stopping:
+            executor.add_node(node)
+            executor.spin()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        stopping = True
+        try:
+            executor.shutdown()
+            if node is not None:
+                try:
+                    node.shutdown()
+                finally:
+                    node.destroy_node()
+        finally:
+            rclpy.try_shutdown()
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
 
 
 class ArmState(Enum):

@@ -1,14 +1,16 @@
 """ROS 2 transport for official Wuji Hand 2 commands and diagnostics."""
 from dataclasses import asdict
 import queue
+import signal
 import threading
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 import rclpy
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
@@ -118,8 +120,12 @@ class Hand2DriverNode(Node):
         try:
             self._backend.connect()
             opened = True
+            if self._stop.is_set():
+                return
             self._lifecycle = "STOPPED"
             self._backend.configure(self._kp, self._kd)
+            if self._stop.is_set():
+                return
             if self._auto_enable:
                 self._action("enable")
             period = 1.0 / self._command_rate
@@ -241,16 +247,40 @@ class Hand2DriverNode(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    # Keep ROS logging alive until the SDK worker has disabled and disconnected.
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    executor = SingleThreadedExecutor()
+    stopping = False
+    initializing = True
+
+    def interrupt(signum, frame):
+        nonlocal stopping
+        if not stopping:
+            stopping = True
+            if not initializing:
+                raise KeyboardInterrupt
+
+    previous = {sig: signal.signal(sig, interrupt)
+                for sig in (signal.SIGINT, signal.SIGTERM)}
     node = None
     try:
         node = Hand2DriverNode()
-        rclpy.spin(node)
+        initializing = False
+        if not stopping:
+            executor.add_node(node)
+            executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        if node is not None:
-            node.close()
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        stopping = True
+        try:
+            executor.shutdown()
+            if node is not None:
+                try:
+                    node.close()
+                finally:
+                    node.destroy_node()
+        finally:
+            rclpy.try_shutdown()
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)

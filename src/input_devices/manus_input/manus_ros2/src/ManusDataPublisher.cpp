@@ -213,7 +213,10 @@ void ManusDataPublisher::PublishCallback()
     
     //Construct message for each glove
     if (m_Landscape == nullptr) {
-        ClientLog::error("Landscape is not initialized.");
+        if (!m_LandscapeWaitShown) {
+            ClientLog::info("Waiting for the initial MANUS landscape.");
+            m_LandscapeWaitShown = true;
+        }
         return;
     }
 
@@ -255,7 +258,10 @@ void ManusDataPublisher::PublishCallback()
         t_Msg.side = SideToString(m_Landscape->gloveDevices.gloves[i].side);
 
         if (t_GloveDataMap.find(t_Msg.glove_id) == t_GloveDataMap.end()) {
-            ClientLog::error("Glove data not found for glove_id: {}", t_Msg.glove_id);
+            if (m_FirstFrameWaitShown.insert(t_GloveId).second) {
+                ClientLog::info("Waiting for the first frame from {} glove (ID: {}).",
+                                 t_Msg.side, t_GloveId);
+            }
             continue;
         }
 

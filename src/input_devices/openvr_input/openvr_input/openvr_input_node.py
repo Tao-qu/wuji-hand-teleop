@@ -19,6 +19,7 @@ except ImportError as exc:
 
 try:
     import rclpy
+    from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
     from geometry_msgs.msg import TransformStamped
     from tf2_ros import TransformBroadcaster
@@ -292,12 +293,12 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

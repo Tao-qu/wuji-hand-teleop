@@ -16,6 +16,7 @@ def _enabled(context, name):
 
 def _nodes(context):
     hand, arm = _enabled(context, "enable_hand"), _enabled(context, "enable_arm")
+    startup_wait = float(LaunchConfiguration("startup_wait_sec").perform(context))
     nodes = []
     if hand:
         path = LaunchConfiguration("hand_config").perform(context)
@@ -39,7 +40,8 @@ def _nodes(context):
             nodes.append(Node(
                 package="controller", executable="wujihand_controller",
                 name=f"wujihand_controller_{side}", output="screen",
-                parameters=[config.get("controller", {})],
+                parameters=[dict(config.get("controller", {}),
+                                 wait_for_arm=arm, startup_wait_sec=startup_wait)],
                 arguments=["--side", side, "--hand-name", name]))
     if arm:
         nodes.append(Node(package="openvr_input", executable="openvr_input", output="screen",
@@ -47,7 +49,8 @@ def _nodes(context):
         nodes.extend(create_chest_tf_nodes())
         nodes.extend(create_tianji_tf_nodes())
         nodes.append(Node(package="controller", executable="tianji_arm_controller", output="screen",
-                          parameters=[{"auto_enable": _enabled(context, "arm_auto_enable")}]))
+                          parameters=[{"auto_enable": _enabled(context, "arm_auto_enable"),
+                                       "startup_wait_sec": startup_wait}]))
     if _enabled(context, "enable_rviz"):
         rviz = Path(get_package_share_directory("openvr_input")) / "rviz" / "openvr_visualization.rviz"
         nodes.append(Node(package="rviz2", executable="rviz2", arguments=["-d", str(rviz)], output="screen"))
@@ -63,5 +66,7 @@ def generate_launch_description():
         DeclareLaunchArgument("hand_side", default_value="both", choices=["both", "left", "right"]),
         DeclareLaunchArgument("hand_auto_enable", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("arm_auto_enable", default_value="true", choices=["true", "false"]),
+        DeclareLaunchArgument("startup_wait_sec", default_value="3.0",
+                              description="Preparation wait shared by hand and arm following"),
         OpaqueFunction(function=_nodes),
     ])
