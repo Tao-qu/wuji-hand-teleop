@@ -57,7 +57,7 @@ openvr:
   parent_frame: world
 ```
 
-The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `chest_mount`, `hand_back_to_tcp`, and `upper_arm_rotations`. A filename resolves in the calibration directory found through the installed bundled profile; with `--symlink-install`, this is `src/input_devices/openvr_input/calibration`. An absolute path is read directly.
+The serial numbers above are placeholders. `openvr.calibration_file` selects a profile containing `chest_mount`, `hand_back_to_tcp`, and `upper_arm_rotations`. A filename resolves in the package calibration directory; with `--symlink-install`, this is `src/input_devices/openvr_input/calibration`. An absolute path is read directly. Only the selected profile needs to exist.
 
 The raw `left_hand_back` and `right_hand_back` Tracker origins provide position directly. The profile's per-side `hand_back_to_tcp` quaternions rotate their axes into `left_tcp_target` and `right_tcp_target`, with zero translation. Robot flange-to-virtual-hand-back-TCP geometry belongs in `driver.tool_transforms.left/right`, in millimetres. The TCP axes are parallel to the flange axes, and the local Tianji IK applies this tool geometry once.
 
@@ -72,7 +72,7 @@ ros2 run openvr_input tracker_calibrate --calibrate \
   --output tracker-hand-back.yaml
 ```
 
-`--output` is required with `--calibrate` and accepts a filename only; there is no default filename. The fixed output directory is resolved through the installed bundled profile's symlink. With `--symlink-install`, the example saves to `src/input_devices/openvr_input/calibration/tracker-hand-back.yaml`. Existing files and symlinks are not overwritten.
+`--output` is required with `--calibrate` and accepts a filename only; there is no default filename. The fixed output directory is located from the package, independently of its profiles. With `--symlink-install`, the example saves to `src/input_devices/openvr_input/calibration/tracker-hand-back.yaml`. Existing files and symlinks are not overwritten.
 
 Follow the prompt to stand upright with arms held symmetrically, elbows bent, hands in front, and palms down. Keep all five Trackers visible and hold still for the five-second capture. Review the displayed fit, then choose `save`, `retry`, or `cancel`.
 

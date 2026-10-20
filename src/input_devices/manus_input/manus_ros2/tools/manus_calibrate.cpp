@@ -150,10 +150,14 @@ Options options(int argc, char** argv) {
         if (o.output.empty() || o.output.has_parent_path() || o.output == "." ||
             o.output == ".." || o.output.string().find('\\') != std::string::npos)
             throw std::runtime_error("--output must be a filename without directories");
-        const auto bundled_profile =
+#ifdef MANUS_CALIBRATION_DIRECTORY
+        const std::filesystem::path output_directory = MANUS_CALIBRATION_DIRECTORY;
+#else
+        const auto output_directory =
             std::filesystem::path(ament_index_cpp::get_package_share_directory("manus_ros2")) /
-            "calibration" / "tpxLeftMetaglovePro.mcal";
-        o.output = std::filesystem::canonical(bundled_profile).parent_path() / o.output;
+            "calibration";
+#endif
+        o.output = output_directory / o.output;
         struct stat info{};
         if (::lstat(o.output.c_str(), &info) == 0 || errno != ENOENT)
             throw std::runtime_error("Output already exists or cannot be inspected; refusing overwrite");

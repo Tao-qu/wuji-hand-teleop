@@ -6,13 +6,18 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 
 
+def config_directory():
+    """Locate arm configuration without relying on individual file symlinks."""
+    package_dir = Path(__file__).resolve().parent
+    if (package_dir.parent / "package.xml").is_file():
+        return package_dir / "config"
+    return Path(get_package_share_directory("tianji_output")) / "config"
+
+
 def arm_config_path(path=None):
     if path:
         return Path(path).expanduser().resolve()
-    return (
-        Path(get_package_share_directory("tianji_output"))
-        / "config" / "tianji_chest.yaml"
-    ).resolve()
+    return (config_directory() / "tianji_chest.yaml").resolve()
 
 
 def load_arm_config(path=None):
@@ -23,5 +28,5 @@ def load_arm_config(path=None):
 def kinematics_path(config):
     path = Path(config["driver"]["kinematics_model"]).expanduser()
     if not path.is_absolute():
-        path = Path(get_package_share_directory("tianji_output")) / "config" / path
+        path = config_directory() / path
     return path.resolve()

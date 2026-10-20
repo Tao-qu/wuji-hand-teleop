@@ -74,6 +74,8 @@ Fill in the two local files generated from templates: `src/output_devices/wujiha
 - `controller`: MANUS `control_rate` and `flip_y: false`. The publisher explicitly requests right-handed coordinates, so the controller preserves XYZ. Set `flip_y: true` only for a separately validated input convention; it reverses chirality and is not a wrist rotation.
 - `manus`: optional absolute `left_calibration_file` and `right_calibration_file` paths. Empty paths select the bundled TPX profiles.
 
+The default arm configuration and relative kinematics filenames are read from the package configuration directory: `src/output_devices/tianji_output/tianji_output/config` with `--symlink-install`, or the package-share `config` directory in a regular install. Directory lookup does not depend on individual configuration files. An explicit `arm_config` path overrides the default YAML.
+
 The arm configuration contains:
 
 - `left_arm.home_joints` and `right_arm.home_joints`: seven joint positions per arm, in degrees.
@@ -81,7 +83,7 @@ The arm configuration contains:
 - `driver.tool_dynamics`: payload source and optional per-arm parameters, described below.
 - `controller.control_rate` and `controller.state_publish_rate`: command and feedback publication rates in Hz. `home_duration_sec` controls the Home trajectory duration; `handoff_hold_sec` and `handoff_ramp_sec` control the measured-pose hold and blend into Tracker following, all in seconds.
 - `openvr.tracker_serials`: `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, and `right_arm` serial numbers. `publish_rate_hz`, `publish_tf`, and `parent_frame` control Tracker publication.
-- `openvr.calibration_file`: the selected Tracker profile. A filename resolves through the installed bundled profile to the calibration directory (`src/input_devices/openvr_input/calibration` with `--symlink-install`); an absolute path is read directly.
+- `openvr.calibration_file`: the selected Tracker profile. A filename resolves in the package calibration directory (`src/input_devices/openvr_input/calibration` with `--symlink-install`); an absolute path is read directly. Directory lookup does not depend on a particular profile existing.
 
 Keep `driver.tool_dynamics.source: controller` to reuse the cabinet's payload values. To supply measured payloads, set `source: configured` and provide separate `left` and `right` arrays of ten values:
 

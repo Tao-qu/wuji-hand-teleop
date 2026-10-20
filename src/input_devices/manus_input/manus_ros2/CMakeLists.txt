@@ -63,6 +63,10 @@ target_include_directories(manus_calibrate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/M
 target_link_directories(manus_calibrate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ManusSDK/lib)
 target_link_libraries(manus_calibrate PRIVATE ManusSDK_Integrated Threads::Threads)
 ament_target_dependencies(manus_calibrate PUBLIC ament_index_cpp)
+if(AMENT_CMAKE_SYMLINK_INSTALL)
+  target_compile_definitions(manus_calibrate PRIVATE
+    MANUS_CALIBRATION_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/calibration")
+endif()
 target_compile_features(manus_calibrate PRIVATE cxx_std_17)
 set_target_properties(manus_calibrate PROPERTIES INSTALL_RPATH "$ORIGIN")
 install(TARGETS manus_calibrate DESTINATION lib/${PROJECT_NAME})

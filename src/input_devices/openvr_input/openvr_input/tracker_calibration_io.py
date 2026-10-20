@@ -25,16 +25,14 @@ def read_config(path):
 
 
 def calibration_directory():
-    """Locate the package calibration directory, following source-install links."""
+    """Locate calibration data independently of the profiles it contains."""
+    package_root = Path(__file__).resolve().parents[1]
+    if (package_root / "package.xml").is_file():
+        return package_root / "calibration"
+
     from ament_index_python.packages import get_package_share_directory
 
-    # Data files are linked individually by --symlink-install. Resolve a bundled
-    # file so new profiles go beside its source, not into the install directory.
-    bundled_profile = (
-        Path(get_package_share_directory("openvr_input"))
-        / "calibration" / "tracker-neutral.yaml"
-    )
-    return bundled_profile.resolve(strict=True).parent
+    return Path(get_package_share_directory("openvr_input")) / "calibration"
 
 
 def calibration_path(arm_config):

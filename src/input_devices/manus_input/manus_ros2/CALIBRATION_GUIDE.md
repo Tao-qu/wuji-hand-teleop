@@ -98,13 +98,13 @@ ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
   --output right-new.mcal
 ```
 
-`--output` is required with `--calibrate`; there is no default filename. Supply only a filename, such as `right-new.mcal`, without a directory or absolute path. The tool resolves the installed bundled profile's symlink to find the fixed calibration directory. With `--symlink-install`, the example writes to:
+`--output` is required with `--calibrate`; there is no default filename. Supply only a filename, such as `right-new.mcal`, without a directory or absolute path. The output directory is independent of any existing profile. With `--symlink-install`, it is fixed at build time to the package's source calibration directory, and the example writes to:
 
 ```text
 src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal
 ```
 
-Existing files and symlinks are not overwritten. The tool does not import the publisher's configured profile before calibration.
+A regular install uses the package-share calibration directory. Existing files and symlinks are not overwritten. The tool does not import the publisher's configured profile before calibration.
 
 Follow the prompts in order:
 

@@ -33,7 +33,7 @@ ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
   --output right-new.mcal
 ```
 
-`--output` is required with `--calibrate` and accepts a filename only, not a directory or absolute path. There is no default filename. The tool resolves the installed bundled profile's symlink to find the calibration directory; with `--symlink-install`, it saves to `src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal`. It refuses to overwrite a file or symlink and never imports a previous profile.
+`--output` is required with `--calibrate` and accepts a filename only, not a directory or absolute path. There is no default filename. With `--symlink-install`, the output directory is fixed at build time to the package's source calibration directory, so the example saves to `src/input_devices/manus_input/manus_ros2/calibration/right-new.mcal`. A regular install uses the package-share calibration directory. Neither location depends on an existing profile. The tool refuses to overwrite a file or symlink and never imports a previous profile.
 
 The tool first requires `start <decimal glove ID>`, then `step <index>` after the operator is ready for each SDK-provided pose, and finally `finish <decimal glove ID>`. Any other input or EOF cancels; after Start, cancellation requests the official Stop API and does not call Finish. Prompt input is interruptible: Ctrl-C or SIGTERM cancels while waiting for a confirmation, including an incomplete input line. StartStep is a blocking SDK call: an in-flight step must return before Stop is called. Keep following the displayed vendor instructions during each step.
 
