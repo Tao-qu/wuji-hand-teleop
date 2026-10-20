@@ -10,24 +10,25 @@ chest_mount:
 
   left:
     # Rotation (radians)
-    roll: 1.5708
+    roll: 1.5707963267948966
     pitch: 0.0
-    yaw: -1.5708
-    # Neutral wrist position calibrated to arm Home (left_chest_base frame, m).
-    local_x: -0.15366554829414047
-    local_y: 0.03816230409229554
-    local_z: 0.10648765803889387
+    yaw: -1.5707963267948966
+    # Mirror-constrained neutral wrist offset (left_chest_base frame, m).
+    local_x: -0.08225734761585848
+    local_y: -0.05761710487083457
+    local_z: 0.08307695821010537
 
   right:
-    roll: 1.5708
+    # Rotation (radians)
+    roll: 1.5707963267948966
     pitch: 0.0
-    yaw: 1.5708
-    # Neutral wrist position calibrated to arm Home (right_chest_base frame, m).
-    local_x: -0.10580115819498509
-    local_y: -0.042273813019709894
-    local_z: 0.11544837576791178
+    yaw: 1.5707963267948966
+    # Mirror-constrained neutral wrist offset (right_chest_base frame, m).
+    local_x: -0.08225734761585848
+    local_y: 0.05761710487083457
+    local_z: 0.08307695821010537
 
-# Wrist to Tianji TF: captured neutral hand orientations align with arm Home.
+# Wrist to Tianji TF: mirror-constrained neutral orientation fit to arm Home.
 # Tracker-local offsets preserve subsequent world-frame rotation increments.
 # Translation remains at the wrist origin.
 wrist_to_tianji:
@@ -35,16 +36,16 @@ wrist_to_tianji:
     x: 0.0
     y: 0.0
     z: 0.0
-    qx: 0.03562881959246257
-    qy: 0.8479454861242605
-    qz: 0.21489518866060578
-    qw: 0.4832588309244457
+    qx: -0.05076668888251317
+    qy: 0.7921934859809802
+    qz: 0.23079726613530577
+    qw: 0.5626587296165212
 
   right:
     x: 0.0
     y: 0.0
     z: 0.0
-    qx: 0.20263253122344868
-    qy: -0.5027602010764445
-    qz: -0.038870031605271665
-    qw: 0.839441098676111
+    qx: 0.23079726613530577
+    qy: -0.5626587296165212
+    qz: 0.05076668888251317
+    qw: 0.7921934859809802

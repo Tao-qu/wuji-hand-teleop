@@ -22,16 +22,16 @@ tracker_serials:
 wrist_offset: [0.0, -0.00275, 0.0535]
 
 # Columns are calibrated-frame axes in the raw upper-arm tracker frame.
-# The calibrated Y axis supplies the arm reference direction; defaults are identity.
+# Mirrored mounting fit paired with static_transforms.yaml; Y is the arm reference.
 upper_arm_rotations:
   left_arm:
-    - [1.0, 0.0, 0.0]
-    - [0.0, 1.0, 0.0]
-    - [0.0, 0.0, 1.0]
+    - [0.9558169572148534, 0.2937424061670544, -0.011372911664506212]
+    - [-0.2937424061670544, 0.9528895191848917, -0.07561060141789232]
+    - [-0.011372911664506212, 0.07561060141789232, 0.9970725619700385]
   right_arm:
-    - [1.0, 0.0, 0.0]
-    - [0.0, 1.0, 0.0]
-    - [0.0, 0.0, 1.0]
+    - [0.9558169572148534, -0.2937424061670544, 0.011372911664506212]
+    - [0.2937424061670544, 0.9528895191848917, -0.07561060141789232]
+    - [0.011372911664506212, 0.07561060141789232, 0.9970725619700385]
 
 # Publishing settings
 publish_rate_hz: 120.0
