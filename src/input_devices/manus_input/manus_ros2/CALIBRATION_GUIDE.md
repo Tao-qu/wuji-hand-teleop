@@ -11,6 +11,8 @@ src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal
 src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal
 ```
 
+These runtime profiles are local and ignored by Git. The adjacent `LeftMetaglovePro.mcal.template` and `RightMetaglovePro.mcal.template` files are tracked, complete binary profiles, not editable text. Setup or `python3 tools/configure.py` copies each template only when the runtime profile is missing. Existing profiles and new calibration results are preserved. `python3 tools/configure.py --check` checks both profiles, the Tracker profile, and the two device configurations without writing.
+
 The package installs `calibration/` into its share directory. The project symlink build reads the source calibration directory. A regular install reads `share/manus_ros2/calibration` under the package install prefix.
 
 Teleoperation and Preview pass the `manus` block from the local `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml` to the publisher:

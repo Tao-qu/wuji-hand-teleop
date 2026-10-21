@@ -46,7 +46,9 @@ The workspace uses one hand configuration, one arm configuration, and three cali
 | `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal` | Right MANUS calibration |
 | `src/input_devices/openvr_input/calibration/tracker.yaml` | Chest transforms, hand-back orientation alignment, and upper-arm mounting rotations |
 
-Setup creates missing hand and arm YAML files from the adjacent templates. These local YAML files are ignored by Git; the templates and calibration files are tracked. Templates describe the supplied installation. Check serial numbers, cabinet IP, mounting dimensions, and operator calibration for your hardware before operation. Edit the source configuration files; the symlink build makes them available to ROS.
+All five runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py` copies only missing files and preserves existing configuration and calibration. `python3 tools/configure.py --check` checks that all five runtime files exist without writing.
+
+Templates describe the supplied installation; the `.mcal.template` files are complete binary profiles, not editable text. Check serial numbers, cabinet IP, mounting dimensions, and operator calibration for your hardware before operation. Edit the source configuration files and use the calibration tools to update profiles; the symlink build makes them available to ROS.
 
 `manus.left_calibration_file` and `manus.right_calibration_file` select the MANUS profiles by filename. `openvr.calibration_file: tracker.yaml` selects the Tracker profile. Calibration filenames resolve in their respective package calibration directories; absolute paths are also supported. Teleoperation and Preview read the same MANUS settings. See [configuration fields and units](docs/LOCAL_SETUP.md#configuration-reference), [MANUS calibration](src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md), and [Tracker calibration](docs/STEAMVR.md#neutral-pose-calibration).
 

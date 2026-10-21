@@ -14,7 +14,8 @@ for option in "$@"; do
 Usage: ./tools/setup.sh [--skip-system] [--skip-build]
 
 Install project dependencies, fetch SDK/model assets, create missing local
-configuration, build the ROS workspace, and check the installed environment.
+configuration and calibration files, build the ROS workspace, and check the
+installed environment.
 Existing configuration and calibration files are preserved.
 
   --skip-system  Skip apt, rosdep, USB rules, and group changes.

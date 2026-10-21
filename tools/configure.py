@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create local hardware YAML files without overwriting existing settings."""
+"""Create local configuration and calibration files without overwriting existing files."""
 import argparse
 from pathlib import Path
 import shutil
@@ -8,22 +8,25 @@ import shutil
 CONFIG_TEMPLATES = (
     "src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml.template",
     "src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml.template",
+    "src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal.template",
+    "src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal.template",
+    "src/input_devices/openvr_input/calibration/tracker.yaml.template",
 )
 
 
 def configure(root, *, check_only=False):
-    """Create missing hand and arm configurations, excluding fetched sources."""
+    """Create missing device settings and input profiles from their templates."""
     root = Path(root)
     created = []
     for relative in CONFIG_TEMPLATES:
         template = root / relative
         if not template.is_file():
-            raise FileNotFoundError(f"Missing configuration template: {template}")
+            raise FileNotFoundError(f"Missing template: {template}")
         destination = template.with_suffix("")
         if destination.exists() and not destination.is_file():
-            raise ValueError(f"Local configuration is not a file: {destination}")
+            raise ValueError(f"Local file is not a regular file: {destination}")
         if destination.is_symlink() and not destination.exists():
-            raise ValueError(f"Local configuration symlink is broken: {destination}")
+            raise ValueError(f"Local file symlink is broken: {destination}")
         if not destination.exists():
             if not check_only:
                 shutil.copyfile(template, destination)
@@ -39,5 +42,5 @@ if __name__ == "__main__":
     for path in paths:
         print(f"{'Missing' if args.check else 'Created'} {path}")
     if args.check and not paths:
-        print("All local configuration files exist")
+        print("All local configuration and calibration files exist")
     raise SystemExit(1 if args.check and paths else 0)

@@ -53,6 +53,8 @@ Match the five serials to `openvr.tracker_serials` in `src/output_devices/tianji
 
 The supplied configuration contains the supplied installation's serials. Assign your actual hardware and keep each serial unique. Leave `openvr.calibration_file: tracker.yaml` to use the canonical profile in `src/input_devices/openvr_input/calibration`.
 
+`tracker.yaml` is local and ignored by Git. Its adjacent `tracker.yaml.template` is tracked. Setup or `python3 tools/configure.py` copies the template only when the runtime file is missing, preserving an existing calibration.
+
 ## Neutral-pose calibration
 
 Configure arm Home, Tracker serials, and `driver.tool_transforms` before calibration. Keep SteamVR running and stop other OpenVR input processes. The tool reads the default local arm configuration, Tracker poses, and local kinematics; it does not connect to the cabinet.

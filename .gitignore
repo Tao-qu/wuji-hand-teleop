@@ -41,12 +41,9 @@ ENV/
 src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml
 src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml
 
-# Keep one default calibration per input; additional operator exports stay local.
+# Local calibration profiles are created from the tracked templates.
 src/input_devices/manus_input/manus_ros2/calibration/*.mcal
-!src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal
-!src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal
 src/input_devices/openvr_input/calibration/*.yaml
-!src/input_devices/openvr_input/calibration/tracker.yaml
 
 # Temporary files
 *.tmp

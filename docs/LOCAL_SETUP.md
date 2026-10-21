@@ -25,11 +25,11 @@ Setup performs the following steps:
 
 1. Installs required system packages, MANUS USB rules, and device-access groups.
 2. Fetches Git LFS assets and the official model revision in `dependencies.lock.json`.
-3. Creates missing local hand and arm configuration files from their templates.
+3. Creates missing local hand and arm configurations and three calibration files from their templates.
 4. Creates a Python 3.10 `.venv` with system packages available and installs `requirements.txt`.
 5. Resolves ROS dependencies, builds the workspace with `--symlink-install`, and checks the environment.
 
-Existing local configuration is preserved. `./tools/setup.sh --skip-system` skips system package, rosdep installation, and USB permission changes; use it when these are already configured. `--skip-build` skips the build and checks that require an installed workspace. `--help` lists the options.
+Existing local configuration and calibration are preserved. `./tools/setup.sh --skip-system` skips system package, rosdep installation, and USB permission changes; use it when these are already configured. `--skip-build` skips the build and checks that require an installed workspace. `--help` lists the options.
 
 After a device-group change, log out and back in, then reconnect the receivers. Load the project environment in each terminal:
 
@@ -59,12 +59,15 @@ The cabinet address is configured in `tianji_chest.yaml`. The control wrapper se
 
 ## Configuration reference
 
-The two runtime YAML files are local and ignored by Git:
+The five runtime configuration and calibration files are local and ignored by Git:
 
 - `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml`
 - `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`
+- `src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal`
+- `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal`
+- `src/input_devices/openvr_input/calibration/tracker.yaml`
 
-Setup creates them only when missing, from the adjacent `.yaml.template` files. The templates hold the supplied installation's settings. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --check` reports missing local files without writing.
+Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py` copies only missing files, preserving existing configuration and calibration. The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --check` reports missing files among all five runtime files without writing.
 
 The source files are the editable configuration for a symlink build. Teleoperation and Home use these default hand and arm configurations. Preview and standalone OpenVR also support an explicit `arm_config` launch argument. A regular install reads its package-share configuration copies.
 
