@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QGroupBox, QMessageBox, QLineEdit, QFrame,
 )
-from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QFont, QPixmap, QImage, QPainter
 from PyQt5.QtSvg import QSvgRenderer
 

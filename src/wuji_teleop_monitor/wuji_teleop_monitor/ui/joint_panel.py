@@ -341,7 +341,7 @@ class JointDisplayPanel(QGroupBox):
             stamps.append(time.monotonic())
 
     def set_phase(self, phase: str):
-        """Set the panel phase: stopped / starting / running / startup_timeout / stopping."""
+        """Set the panel phase: stopped / starting / running / stopping."""
         self._phase = phase
         self._refresh_display()
 

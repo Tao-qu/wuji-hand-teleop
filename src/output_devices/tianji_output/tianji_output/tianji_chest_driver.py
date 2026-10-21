@@ -107,11 +107,6 @@ class TianjiChestDriver:
         if not self._verify_connection():
             raise ConnectionError("Robot connection failed")
 
-        TianjiChestDriver._shared_robot = self.robot
-        TianjiChestDriver._shared_kine_left = self.kine_left
-        TianjiChestDriver._shared_kine_right = self.kine_right
-        TianjiChestDriver._initialized = True
-
         # ---------------------- IK parameters (live-tunable) ----------------------
         self.zsp_type = 1                            # nullspace constraint type
         self.left_zsp_para = [0, -1, -0.5, 0, 0, 0]  # left-arm nullspace plane

@@ -64,6 +64,8 @@ target_link_directories(manus_calibrate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Manu
 target_link_libraries(manus_calibrate PRIVATE ManusSDK_Integrated Threads::Threads)
 ament_target_dependencies(manus_calibrate PUBLIC ament_index_cpp)
 if(AMENT_CMAKE_SYMLINK_INSTALL)
+  target_compile_definitions(manus_data_publisher PRIVATE
+    MANUS_CALIBRATION_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/calibration")
   target_compile_definitions(manus_calibrate PRIVATE
     MANUS_CALIBRATION_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/calibration")
 endif()

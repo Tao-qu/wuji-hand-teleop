@@ -3,14 +3,10 @@
 <package format="3">
   <name>tianji_output</name>
   <version>0.1.0</version>
-  <description>Tianji output node that reads wrist topics</description>
+  <description>Tianji arm hardware interface library with a chest-frame driver</description>
   <maintainer email="support@wuji.tech">Wuji Tech</maintainer>
   <license>MIT</license>
 
-  <depend>rclpy</depend>
-  <depend>std_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>tf2_ros</depend>
   <depend>ament_index_python</depend>
   <exec_depend>python3-yaml</exec_depend>
 

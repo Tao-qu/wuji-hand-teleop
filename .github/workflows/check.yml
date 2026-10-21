@@ -10,4 +10,4 @@ jobs:
       - name: Python and shell syntax
         run: |
           python3 -m compileall -q src tools
-          bash -n tools/env.sh src/wuji_teleop_monitor/scripts/launcher.sh src/wuji_teleop_monitor/install_desktop.sh
+          bash -n tools/*.sh src/wuji_teleop_monitor/scripts/launcher.sh src/wuji_teleop_monitor/install_desktop.sh

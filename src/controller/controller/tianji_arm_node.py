@@ -24,7 +24,6 @@ from std_srvs.srv import SetBool, Trigger
 from tianji_output import TianjiChestDriver
 from tianji_output.configuration import load_arm_config
 from .common import (
-    ArmState,
     ROS2LoggerAdapter,
     get_default_qos,
     run_ros_node,
@@ -87,7 +86,6 @@ class TianjiArmControllerNode(Node):
             raise ValueError(
                 f"state_publish_rate must be > 0, got {self._state_publish_rate_hz}")
 
-        self._arm_state = ArmState.IMPEDANCE
         self._logger_adapter = ROS2LoggerAdapter(self.get_logger())
         self._log_counter = 0
         self._state_error_count = 0  # consecutive get_current_joints failures
@@ -101,13 +99,11 @@ class TianjiArmControllerNode(Node):
         self._arm_enabled = False
         self._enable_lock = threading.Lock()
 
-        # Pose and joint caches.
+        # Pose caches.
         self.left_pose = None
         self.right_pose = None
         self.left_y_axis = None
         self.right_y_axis = None
-        self._last_left_state_joints = None
-        self._last_right_state_joints = None
 
         # Handoff ramp state — populated at the end of _do_enable, consumed by
         # _teleop_control. `_handoff_start_at is None` means no ramp pending.
@@ -198,7 +194,6 @@ class TianjiArmControllerNode(Node):
         """Stop teleop, publish SDK_ERROR, and request standby."""
         self.get_logger().error(f"[{context}] SDK exception: {error}; auto-disabling arm")
         self._arm_enabled = False
-        self._arm_state = ArmState.IMPEDANCE
         self.left_pose = None
         self.right_pose = None
         self._publish_lifecycle(LIFECYCLE_SDK_ERROR)
@@ -231,7 +226,6 @@ class TianjiArmControllerNode(Node):
                 raise RuntimeError("move_to_init failed")
             self.controller.set_impedance_mode(mode='joint')
             self._arm_enabled = True
-            self._arm_state = ArmState.IMPEDANCE
             self._arm_handoff_snapshot()
             self._publish_lifecycle(LIFECYCLE_READY)
 
@@ -239,7 +233,6 @@ class TianjiArmControllerNode(Node):
         """Standby (servo-off, keep connection). Idempotent under _enable_lock."""
         with self._enable_lock:
             self._arm_enabled = False
-            self._arm_state = ArmState.IMPEDANCE
             self.left_pose = None
             self.right_pose = None
             self._publish_lifecycle(LIFECYCLE_DISABLED)
@@ -388,7 +381,6 @@ class TianjiArmControllerNode(Node):
         Read cabinet state before deciding whether a mode change is needed.
         """
         target_state = 1 if request.data else 3
-        target_enum = ArmState.POSITION if request.data else ArmState.IMPEDANCE
         _NAMES = {1: "rigid (position)", 3: "compliant (impedance)"}
 
         try:
@@ -399,7 +391,6 @@ class TianjiArmControllerNode(Node):
             return response
 
         if left_s == target_state and right_s == target_state:
-            self._arm_state = target_enum
             response.success = True
             response.message = f"Already in {_NAMES[target_state]} mode (cur_state={target_state})"
             return response
@@ -431,7 +422,6 @@ class TianjiArmControllerNode(Node):
             response.message = f"Arm communication error: {e}"
             return response
 
-        self._arm_state = target_enum
         self.get_logger().info(f"Arms switched to {_NAMES[target_state]} mode")
         response.success = True
         response.message = _NAMES[target_state]
@@ -570,8 +560,6 @@ class TianjiArmControllerNode(Node):
         try:
             left_joints, right_joints = self.controller.get_current_joints()
             self._state_error_count = 0  # reset on success
-            self._last_left_state_joints = list(left_joints) if left_joints is not None else None
-            self._last_right_state_joints = list(right_joints) if right_joints is not None else None
             stamp = self.get_clock().now().to_msg()
 
             if left_joints is not None:

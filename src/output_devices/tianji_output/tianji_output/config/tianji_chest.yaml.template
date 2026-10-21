@@ -6,7 +6,7 @@ right_arm:
   home_joints: [-55.0, -65.0, 70.0, -60.0, -60.0, 0.0, 0.0]
 
 driver:
-  robot_ip: "192.168.1.190"
+  robot_ip: "6.6.7.190"
   kinematics_model: "ccs_m6.MvKDCfg"
   # Flange -> virtual hand-back TCP, mm; TCP axes parallel to flange axes.
   # Approximate mounting: +Z toward fingers; dorsal -Y left, +Y right.
@@ -37,13 +37,13 @@ controller:
   handoff_ramp_sec: 1.0
 
 openvr:
-  calibration_file: "tracker-neutral.yaml"
+  calibration_file: "tracker.yaml"
   tracker_serials:
-    chest: "LHR-XXXXXXXX"
-    left_hand_back: "LHR-XXXXXXXX"
-    right_hand_back: "LHR-XXXXXXXX"
-    left_arm: "LHR-XXXXXXXX"
-    right_arm: "LHR-XXXXXXXX"
+    chest: "LHR-8304D4CF"
+    left_hand_back: "LHR-9BFC64E3"
+    right_hand_back: "LHR-BC4F0E1C"
+    left_arm: "LHR-1ACBC7E2"
+    right_arm: "LHR-55DCF12E"
   publish_rate_hz: 120.0
   publish_tf: true
   parent_frame: "world"

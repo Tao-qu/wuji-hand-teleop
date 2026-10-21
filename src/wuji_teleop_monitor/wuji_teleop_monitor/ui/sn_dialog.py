@@ -56,10 +56,6 @@ def _resolve_config_path(pkg_name: str, filename: str) -> Optional[Path]:
     return cand.resolve() if cand.exists() else None
 
 
-def _format_path_lines(path: Path) -> List[str]:
-    return [str(path)]
-
-
 def _load_yaml(path: Path, log: LogCallback):
     """Load YAML preserving comments + ordering when ruamel.yaml is available."""
     try:
@@ -133,7 +129,7 @@ class WujiHand2Scanner:
         return []
 
 
-def _suggest_side(device: dict, kind: str) -> Optional[str]:
+def _suggest_side(device: dict) -> Optional[str]:
     """Use the handedness returned by the SDK."""
     return device.get("side")
 
@@ -428,7 +424,6 @@ class ScanSNDialog(QDialog):
     _SECTION_CSS = "color: #888; font-size: 9px; font-weight: bold; letter-spacing: 1px;"
     _BODY_CSS = "color: #ddd; font-size: 10px;"
     _MUTED_CSS = "color: #888; font-size: 9px;"
-    _SN_CSS = "color: #e8e8e8; font-size: 11px;"
 
     def _section_header(self, text: str) -> QLabel:
         lbl = QLabel(text.upper())
@@ -454,15 +449,12 @@ class ScanSNDialog(QDialog):
         name_lbl = QLabel(f"   {yaml_path.name}")
         name_lbl.setStyleSheet(self._BODY_CSS)
         v.addWidget(name_lbl)
-        # Render path lines individually so the local file path
-        # column lines up vertically when both lines are present.
-        for path_line in _format_path_lines(yaml_path):
-            line_lbl = QLabel(f"   {path_line}")
-            line_lbl.setStyleSheet(
-                "color: #888; font-size: 9px; font-family: 'Courier New';")
-            line_lbl.setTextFormat(Qt.RichText)
-            line_lbl.setWordWrap(True)
-            v.addWidget(line_lbl)
+        path_lbl = QLabel(f"   {yaml_path}")
+        path_lbl.setStyleSheet(
+            "color: #888; font-size: 9px; font-family: 'Courier New';")
+        path_lbl.setTextFormat(Qt.PlainText)
+        path_lbl.setWordWrap(True)
+        v.addWidget(path_lbl)
 
         # Section 2 — CURRENTLY SAVED (small mono, colour-coded by side).
         current = _read_current_sns(yaml_path, left_key, right_key, self._log)
@@ -494,8 +486,6 @@ class ScanSNDialog(QDialog):
             sn = d["sn"]
 
             extra_parts = []
-            if d.get("bus") and d.get("device"):
-                extra_parts.append(f"bus={d['bus']} dev={d['device']}")
             if d.get("address"):
                 extra_parts.append(f"addr={d['address']}")
             if d.get("transport"):
@@ -505,7 +495,7 @@ class ScanSNDialog(QDialog):
                     extra_parts.append(f"{key}={d[key]}")
             extra_text = ", ".join(extra_parts)
 
-            suggested = _suggest_side(d, kind)
+            suggested = _suggest_side(d)
 
             if sn == current.get("left"):
                 tag_html = "<span style='color:#81C784;'>(currently left)</span>"

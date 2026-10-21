@@ -2,17 +2,15 @@
 Shared utilities — common classes and helpers used by controller nodes.
 
 Includes:
-- ArmState: arm-motor control-state enum
 - ROS2LoggerAdapter: ROS2 logger adapter
 - Default QoS profile
 - Config-loading helpers
 """
 from __future__ import annotations
 
-from enum import Enum
 from pathlib import Path
 import signal
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import rclpy
 import yaml
@@ -60,12 +58,6 @@ def run_ros_node(factory, args=None):
             rclpy.try_shutdown()
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
-
-
-class ArmState(Enum):
-    """Arm-motor control state (mirrors SDK ARM_STATE)."""
-    IMPEDANCE = "impedance"  # state=3, compliant (default; suited to teleop)
-    POSITION = "position"    # state=1, joint-position control
 
 
 class ROS2LoggerAdapter:
@@ -126,28 +118,3 @@ def load_yaml_config(config_path: str | Path) -> Dict[str, Any]:
 
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
-
-
-def get_package_config_path(package_name: str, config_filename: str) -> Optional[Path]:
-    """Resolve the path to a config file shipped inside a ROS2 package.
-
-    Args:
-        package_name: ROS2 package name.
-        config_filename: config filename (under the package's config/ dir).
-
-    Returns:
-        Path to the config file, or None if the package cannot be located.
-    """
-    from ament_index_python.packages import (
-        get_package_share_directory,
-        PackageNotFoundError,
-    )
-    try:
-        share_dir = Path(get_package_share_directory(package_name))
-    except PackageNotFoundError:
-        # Package not installed in the current AMENT_PREFIX_PATH — the
-        # caller has to handle this (typically: fall back to a CLI-supplied
-        # path). Any other ament error is a real install bug we want
-        # propagated.
-        return None
-    return share_dir / "config" / config_filename

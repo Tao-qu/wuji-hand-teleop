@@ -1,5 +1,6 @@
 """Visualize MANUS targets and Tracker poses."""
 from pathlib import Path
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -10,6 +11,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from tianji_output.configuration import arm_config_path
+from wuji_teleop_bringup.launch_utils import resolve_config_path
 
 
 TF_REMAPS = [("/tf", "/preview/tf"), ("/tf_static", "/preview/tf_static")]
@@ -19,9 +21,9 @@ def _nodes(context):
     enabled = lambda name: LaunchConfiguration(name).perform(context).lower() == "true"
     nodes = []
     if enabled("start_inputs"):
-        manus_share = Path(get_package_share_directory("manus_ros2"))
-        profiles = {f"{side}_calibration_file": str(manus_share / "calibration" / f"tpx{side.title()}MetaglovePro.mcal")
-                    for side in ("left", "right")}
+        with open(resolve_config_path("wujihand2_ros2", "wujihand2.yaml")) as stream:
+            hand_config = yaml.safe_load(stream)
+        profiles = hand_config.get("manus", {})
         config_path = arm_config_path(LaunchConfiguration("arm_config").perform(context))
         nodes += [
             Node(package="manus_ros2", executable="manus_data_publisher", name="preview_manus",

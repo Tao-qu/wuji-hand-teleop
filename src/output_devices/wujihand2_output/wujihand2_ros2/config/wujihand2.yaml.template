@@ -1,29 +1,21 @@
-# Wuji Hand 2 serial numbers and SDK/ROS parameters.
+# Hand Home positions are radians in firmware order.
 left_hand:
-  serial_number: "YOUR_LEFT_HAND2_SERIAL"
-  name: "left_hand"
-  # Radians; firmware order: thumb/index/middle/ring/pinky, four joints each.
+  serial_number: WH2JA01260820046
+  name: left_hand
   home_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 right_hand:
-  serial_number: "YOUR_RIGHT_HAND2_SERIAL"
-  name: "right_hand"
-  # Radians; firmware order: thumb/index/middle/ring/pinky, four joints each.
+  serial_number: WH2KA01260823036
+  name: right_hand
   home_joints: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
 driver:
-  auto_enable: true
   command_rate: 200.0
   publish_rate: 200.0
   diagnostics_rate: 10.0
-  kp: 3.0
-  kd: 0.05
-
+  kp: 5.0
+  kd: 0.1
 controller:
   control_rate: 120.0
-  flip_y: false            # explicit right-handed MANUS input; preserve XYZ chirality
-
-# Empty paths use bundled tpxLeftMetaglovePro.mcal / tpxRightMetaglovePro.mcal.
-# Set absolute paths here to select different operator-specific profiles.
+  flip_y: false
 manus:
-  left_calibration_file: ""
-  right_calibration_file: ""
+  left_calibration_file: LeftMetaglovePro.mcal
+  right_calibration_file: RightMetaglovePro.mcal

@@ -12,6 +12,46 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def check_configuration(mode):
+    """Resolve the same settings and calibration files used by the launchers."""
+    import yaml
+    from ament_index_python.packages import get_package_share_directory
+
+    if mode != "arms":
+        from wuji_teleop_bringup.launch_utils import resolve_config_path
+
+        config_path = Path(resolve_config_path("wujihand2_ros2", "wujihand2.yaml"))
+        config = yaml.safe_load(config_path.read_text())
+        calibration_dir = ROOT / "src/input_devices/manus_input/manus_ros2/calibration"
+        if not calibration_dir.is_dir():
+            calibration_dir = Path(get_package_share_directory("manus_ros2")) / "calibration"
+        for side in ("left", "right"):
+            values = config[f"{side}_hand"]
+            if len(values["home_joints"]) != 20:
+                raise ValueError(f"{side} hand Home must contain 20 positions")
+            configured = config.get("manus", {}).get(f"{side}_calibration_file")
+            profile = Path(configured or f"{side.title()}MetaglovePro.mcal")
+            if not profile.is_absolute():
+                profile = calibration_dir / profile
+            if not profile.is_file() or profile.stat().st_size == 0:
+                raise ValueError(f"Missing MANUS calibration: {profile}")
+            print(f"OK {side} MANUS calibration {profile.name}")
+        print(f"OK hand configuration {config_path.resolve()}")
+    if mode != "hands":
+        from tianji_output.configuration import arm_config_path, kinematics_path, load_arm_config
+        from openvr_input.tracker_calibration_io import calibration_path, load_selected_profile, validate_profile
+
+        config = load_arm_config()
+        for side in ("left", "right"):
+            if len(config[f"{side}_arm"]["home_joints"]) != 7:
+                raise ValueError(f"{side} arm Home must contain seven positions")
+        if not kinematics_path(config).is_file():
+            raise ValueError(f"Missing kinematics model: {kinematics_path(config)}")
+        validate_profile(load_selected_profile(config))
+        print(f"OK arm configuration {arm_config_path()}")
+        print(f"OK Tracker calibration {calibration_path(config)}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["all", "hands", "arms"], default="all")
@@ -39,6 +79,10 @@ def main():
             print(f"OK version {name}=={wanted}")
         except Exception as exc:
             errors.append(f"{name}: {exc}")
+    try:
+        check_configuration(args.mode)
+    except Exception as exc:
+        errors.append(f"Configuration: {exc}")
     if args.mode != "arms":
         try:
             from ament_index_python.packages import get_package_share_directory

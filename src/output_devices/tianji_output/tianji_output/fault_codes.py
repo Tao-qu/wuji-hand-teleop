@@ -53,26 +53,6 @@ def describe_fault_codes(codes: Iterable[Any], empty: str = "") -> list[str]:
     return [describe_fault_code(code, empty=empty) for code in codes]
 
 
-def format_fault_descriptions(codes: Iterable[Any]) -> str:
-    """Return the vendor-style multi-line string for CLI diagnostics."""
-    lines = []
-    for joint_idx, code in enumerate(codes, 1):
-        normalized = normalize_fault_code(code)
-        if normalized == "0x0000":
-            continue
-        lines.append(
-            f"joint {joint_idx}: {normalized} - "
-            f"{describe_fault_code(normalized, empty='')}"
-        )
-    if not lines:
-        return "None"
-    if len(lines) == 1:
-        return lines[0]
-    return "Fault information for each joint:\n" + "\n".join(
-        f"{idx}. {line}" for idx, line in enumerate(lines, 1)
-    )
-
-
 def read_servo_fault_codes(robot_handle: Any, arm: str) -> list[str]:
     """Read raw 7-axis servo fault codes from a Tianji ctypes handle.
 

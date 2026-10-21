@@ -1,45 +1,52 @@
-# Wuji Hand 2 ROS adapter
+# Wuji Hand 2.2 ROS adapter
 
-The `wujihand2_ros2` package connects each configured hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Run one driver process per hand with its serial number and left/right namespace. The main [project README](../../../README.md) covers installation and launch commands.
+`wujihand2_ros2` connects each hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Each hand runs in its own driver process with its configured serial number and namespace. The package also provides the official retargeting wrapper, MANUS keypoint conversion, and ROS command interface.
 
-The package lives in `wujihand2_ros2/` under this directory. It contains the SDK driver, official retargeting wrapper, MANUS keypoint conversion, and ROS command interface. The outer `wujihand2_output` directory groups these files and is not a ROS package. The sibling `wuji-description/` directory contains the pinned official model checkout; `hand2/hand2_2/body` provides the `wuji_hand2_2_description` ROS package.
+The ROS package is in `wujihand2_ros2/`. Its sibling `wuji-description/` is the pinned official model checkout; `hand2/hand2_2/body` provides `wuji_hand2_2_description`. The [project setup command](../../../docs/LOCAL_SETUP.md) installs dependencies, fetches that model, and builds both packages.
 
-The driver executable is `wujihand2_driver`. Normal teleoperation and Home start it through the unified bringup entrypoint. Configuration is stored in `wujihand2_ros2/config/wujihand2.yaml`, generated from the adjacent template; the package installs it as `share/wujihand2_ros2/config/wujihand2.yaml`.
+## Configuration and launch
 
-## Parameters
+The local configuration is `wujihand2_ros2/config/wujihand2.yaml`, created from its adjacent template when missing. Teleoperation, Home, and the monitor use this file. It supplies each hand's serial number, ROS namespace, 20 Home positions, driver parameters, controller parameters, and MANUS profile selection.
 
-| Parameter | Default | Purpose |
+```bash
+source tools/env.sh
+ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-arm
+```
+
+The command starts both hands and MANUS, enables the hand drivers, and begins following after the three-second preparation interval. Add `--home` to send the configured Home positions and exit without MANUS. See the [operating commands](../../../README.md#start-teleoperation) for combined mode, monitor, and services.
+
+The driver executable is `wujihand2_driver`. Its parameters are:
+
+| Parameter | Node default | Meaning |
 | --- | --- | --- |
-| `serial_number` | empty | SDK device serial number |
-| `expected_side` | empty | `left` or `right`, used for joint names and device label |
+| `serial_number` | Empty | SDK device serial number |
+| `expected_side` | Empty | `left` or `right`, used for joint names and device label |
 | `auto_enable` | `true` | Enable after connection and gain configuration |
-| `command_rate` | `200.0` | SDK command loop, Hz |
-| `publish_rate` | `200.0` | ROS feedback publication timer, Hz |
-| `diagnostics_rate` | `10.0` | ROS diagnostics and lifecycle publication, Hz |
+| `command_rate` | `200.0` | SDK command loop rate in Hz |
+| `publish_rate` | `200.0` | ROS feedback publication timer rate in Hz |
+| `diagnostics_rate` | `10.0` | Diagnostics and lifecycle publication rate in Hz |
 | `kp` | `3.0` | SDK MIT proportional gain |
 | `kd` | `0.05` | SDK MIT derivative gain |
 
-The launch file loads the local `wujihand2.yaml` driver block, then supplies each hand's serial, side, and fixed `auto_enable: true`. Local gains may differ from the template defaults.
+Bringup loads the YAML `driver` block and supplies each hand's serial, side, and `auto_enable: true`. The supplied runtime configuration uses `kp: 5.0` and `kd: 0.1`; these override the node defaults above.
 
 ## Topics and services
 
-All interfaces are relative to the driver namespace (`left_hand` or `right_hand`).
+Interfaces are relative to the driver namespace, normally `/left_hand` or `/right_hand`:
 
 | Interface | ROS type | Content |
 | --- | --- | --- |
 | `joint_commands` | `sensor_msgs/JointState` | Twenty target positions in radians, firmware order |
 | `joint_states` | `sensor_msgs/JointState` | SDK positions and velocities with joint names |
-| `diagnostics` | `diagnostic_msgs/DiagnosticArray` | Device status and per-joint current, temperature, voltage, and error code |
-| `lifecycle_state` | `std_msgs/String` | Driver lifecycle |
-| `set_enabled` | `std_srvs/SetBool` | Queue enable or disable |
-| `emergency_stop` | `std_srvs/Trigger` | Queue the SDK emergency-stop operation |
-| `clear_fault` | `std_srvs/Trigger` | Queue the SDK clear-fault operation |
+| `diagnostics` | `diagnostic_msgs/DiagnosticArray` | Device status, motor current, temperature, voltage, and joint error codes |
+| `lifecycle_state` | `std_msgs/String` | Driver lifecycle state |
+| `set_enabled` | `std_srvs/srv/SetBool` | Queue enable or disable |
+| `emergency_stop` | `std_srvs/srv/Trigger` | Queue SDK emergency stop |
+| `clear_fault` | `std_srvs/srv/Trigger` | Queue SDK fault clearing |
 
-Commands use the `position` array in thumb, index, middle, ring, pinky order, four joints per finger. The driver uses that order directly; `name`, `velocity`, `effort`, and the ROS timestamp do not change target interpretation. The worker publishes `JointCommand(position, 0.0, 0.0)` values while enabled, retaining the latest target between messages.
+Commands use the `position` array directly. Names, velocity, effort, and ROS timestamps do not change target interpretation. The worker sends SDK `JointCommand(position, 0.0, 0.0)` values while enabled and retains the latest target between messages.
 
-Feedback is ordered by SDK NID:
-
-| Finger | Command indices | Joint NIDs |
+| Finger | Command indices | Feedback joint NIDs |
 | --- | --- | --- |
 | Thumb | 0–3 | 1–4 |
 | Index | 4–7 | 6–9 |
@@ -47,12 +54,19 @@ Feedback is ordered by SDK NID:
 | Ring | 12–15 | 16–19 |
 | Pinky | 16–19 | 21–24 |
 
-The driver publishes each newly received state sample once. `JointState.effort` is empty; `diagnostics` exposes motor current as `current_a`. Joint names use the official Hand 2.2 names with `l_` or `r_` prefixes.
+Feedback is sorted by joint NID and published once per newly received state sample. Joint names match the official Hand 2.2 model with `l_` or `r_` prefixes. `JointState.effort` is empty; diagnostics report motor current as `current_a` in amperes.
 
-## Lifecycle
+```bash
+ros2 topic hz /left_hand/joint_states
+ros2 topic echo /left_hand/lifecycle_state
+ros2 topic echo /left_hand/diagnostics
+ros2 service call /left_hand/set_enabled std_srvs/srv/SetBool '{data: false}'
+```
 
-Connection starts in `DISCONNECTED`. After connecting, the worker sets MIT gains and enters `STOPPED`; automatic enable then enters `READY`. A successful target send enters `ACTIVE`. Disable and emergency-stop operations enter `STOPPED`; closing the connection returns to `DISCONNECTED`.
+## Lifecycle and shutdown
 
-Service responses acknowledge queue admission. The SDK worker performs the operation and reports its result through lifecycle and diagnostics. Clear-fault invokes the SDK directly without changing the driver's enabled flag. Device error codes are displayed in diagnostics.
+A driver begins `DISCONNECTED`. After connection and gain configuration it enters `STOPPED`; enabling enters `READY`, and a successful target send enters `ACTIVE`. Disable and emergency stop enter `STOPPED`. Closing the connection returns to `DISCONNECTED`.
 
-SDK callbacks cache feedback. One worker thread owns RPCs and command writes, while ROS timers publish cached state and diagnostics. On driver shutdown, the worker requests disable, closes its streams, and disconnects. Releasing a hand controller closes its ROS publishers and subscriptions; driver shutdown owns hardware cleanup.
+Service responses acknowledge queue admission. The SDK worker performs the requested operation and reports the result through lifecycle and diagnostics. Fault clearing calls the SDK without changing the driver's enabled flag.
+
+SDK callbacks cache feedback. One worker owns RPCs and command writes while ROS timers publish cached state and diagnostics. On shutdown, the worker requests disable, closes its streams, and disconnects. The controller releases its ROS publishers and subscriptions; driver shutdown releases the hardware connection.

@@ -4,6 +4,7 @@ install/
 log/
 *.bag
 *.db3
+*.mcap
 
 # Python
 __pycache__/
@@ -24,7 +25,6 @@ venv/
 env/
 ENV/
 .venv
-tools/env.local.sh
 
 # IDEs
 .vscode/
@@ -37,11 +37,16 @@ tools/env.local.sh
 # Jupyter Notebooks
 .ipynb_checkpoints
 
-# Per-machine config files (hardware SNs / IPs etc).
-# Repo tracks `<file>.yaml.template` only. Operator copies the template
-# to `<file>.yaml`, fills real values, and the live file stays out of git.
-# Launch helpers + Scan SNs UI both read the single `<file>.yaml` path.
+# Runtime device settings are created from the tracked templates.
 src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml
+src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml
+
+# Keep one default calibration per input; additional operator exports stay local.
+src/input_devices/manus_input/manus_ros2/calibration/*.mcal
+!src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal
+!src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal
+src/input_devices/openvr_input/calibration/*.yaml
+!src/input_devices/openvr_input/calibration/tracker.yaml
 
 # Temporary files
 *.tmp
@@ -49,4 +54,3 @@ src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml
 *.log
 work/
 src/output_devices/wujihand2_output/wuji-description/
-src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml

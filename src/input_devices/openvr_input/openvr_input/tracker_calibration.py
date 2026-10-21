@@ -157,7 +157,7 @@ def fit_calibration(context, samples):
         "hand_back_to_tcp": {side: {} for side in SIDES},
         "upper_arm_rotations": deepcopy(profile["upper_arm_rotations"]),
     }
-    fit = {"sample_count": count}
+    fit = {}
 
     for side in SIDES:
         current = data[side]
@@ -188,9 +188,6 @@ def fit_calibration(context, samples):
             "mean_position_error_mm": float(position_error.mean() * 1000.0),
             "mean_tcp_angle_deg": float(tcp_angle.mean()),
             "mean_upper_direction_angle_deg": float(upper_angle.mean()),
-            "position_rms_m": float(np.sqrt(np.mean(position_error ** 2))),
-            "orientation_rms_deg": float(np.sqrt(np.mean(tcp_angle ** 2))),
-            "upper_arm_rms_deg": float(np.sqrt(np.mean(upper_angle ** 2))),
         }
 
     return {"calibration": calibration, "fit": fit}

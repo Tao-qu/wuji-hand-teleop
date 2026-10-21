@@ -1,6 +1,7 @@
 #include "ManusDataPublisher.hpp"
 #include "ManusSDKTypes.h"
 #include "../tools/manus_skeleton_metadata.hpp"
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
@@ -646,16 +647,27 @@ bool ManusDataPublisher::LoadCalibrationFile(uint32_t p_GloveId, Side p_Side)
         ClientLog::error("Invalid Side value for calibration loading: {}", static_cast<int>(p_Side));
         return false;
     }
-    std::string t_CalibrationPath = p_Side == Side_Left ? m_LeftCalibrationFile : m_RightCalibrationFile;
-    if (t_CalibrationPath.empty()) {
+    std::filesystem::path t_CalibrationFile =
+        p_Side == Side_Left ? m_LeftCalibrationFile : m_RightCalibrationFile;
+    if (t_CalibrationFile.empty()) {
+        t_CalibrationFile = p_Side == Side_Left ? "LeftMetaglovePro.mcal" : "RightMetaglovePro.mcal";
+    }
+    if (t_CalibrationFile.is_relative()) {
         try {
-            t_CalibrationPath = ament_index_cpp::get_package_share_directory("manus_ros2") +
-                (p_Side == Side_Left ? "/calibration/tpxLeftMetaglovePro.mcal" : "/calibration/tpxRightMetaglovePro.mcal");
+#ifdef MANUS_CALIBRATION_DIRECTORY
+            const std::filesystem::path t_CalibrationDirectory = MANUS_CALIBRATION_DIRECTORY;
+#else
+            const auto t_CalibrationDirectory =
+                std::filesystem::path(ament_index_cpp::get_package_share_directory("manus_ros2")) /
+                "calibration";
+#endif
+            t_CalibrationFile = t_CalibrationDirectory / t_CalibrationFile;
         } catch (const std::exception& e) {
-            ClientLog::error("Failed to get package share directory: {}", e.what());
+            ClientLog::error("Failed to resolve calibration directory: {}", e.what());
             return false;
         }
     }
+    const std::string t_CalibrationPath = t_CalibrationFile.string();
 
     // Check if file exists
     std::ifstream t_File(t_CalibrationPath, std::ios::binary);

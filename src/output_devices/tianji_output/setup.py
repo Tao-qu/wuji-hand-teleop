@@ -31,6 +31,6 @@ setup(
     zip_safe=False,  # Must be False because of shared libraries
     maintainer='wuji',
     maintainer_email='your_email@example.com',
-    description='Tianji arm hardware interface library - exports TianjiArmController and TianjiChestDriver',
+    description='Tianji arm hardware interface library with a chest-frame driver',
     license='MIT',
 )

@@ -1,127 +1,86 @@
-# MANUS calibration profiles and calibration tool
+# MANUS calibration
 
-The publisher loads a separate `.mcal` profile for each glove side through the bundled MANUS Integrated SDK. File loading and the interactive `manus_calibrate` executable are already implemented; no C++ or CMake changes are needed to select another profile.
+The MANUS publisher loads one `.mcal` profile for each glove side. The `manus_calibrate` executable inspects or calibrates one explicitly selected glove and exports a profile through the bundled Integrated SDK.
 
-## Installed profiles
+## Profiles and selection
 
-The package contains these default files:
-
-```text
-manus_ros2/
-├── calibration/
-│   ├── tpxLeftMetaglovePro.mcal
-│   └── tpxRightMetaglovePro.mcal
-├── ManusSDK/
-├── src/
-│   ├── ManusDataPublisher.cpp
-│   └── ManusDataPublisher.hpp
-└── tools/
-    └── manus_calibrate.cpp
-```
-
-`CMakeLists.txt` installs `calibration/` into the package share directory. For a normal isolated colcon install, the files are located at:
+The canonical profiles are:
 
 ```text
-install/manus_ros2/share/manus_ros2/calibration/tpxLeftMetaglovePro.mcal
-install/manus_ros2/share/manus_ros2/calibration/tpxRightMetaglovePro.mcal
+src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal
+src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal
 ```
 
-The publisher resolves that directory through `ament_index_cpp`. Keep the original TPX filenames when using the packaged defaults. A profile supplied through a parameter can have any filename; select the profile for the intended operator and glove side.
+The package installs `calibration/` into its share directory. The project symlink build reads the source calibration directory. A regular install reads `share/manus_ros2/calibration` under the package install prefix.
 
-## Select profiles
-
-The publisher declares two string parameters:
-
-| Parameter | Default when empty |
-| --- | --- |
-| `left_calibration_file` | Package-share `calibration/tpxLeftMetaglovePro.mcal` |
-| `right_calibration_file` | Package-share `calibration/tpxRightMetaglovePro.mcal` |
-
-For normal bringup, edit the `manus` block in the local `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml`:
+Teleoperation and Preview pass the `manus` block from the local `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml` to the publisher:
 
 ```yaml
 manus:
-  left_calibration_file: /absolute/path/to/left-profile.mcal
-  right_calibration_file: /absolute/path/to/right-profile.mcal
+  left_calibration_file: LeftMetaglovePro.mcal
+  right_calibration_file: RightMetaglovePro.mcal
 ```
 
-Use `""` for either value to select that side's packaged TPX profile. The launch file passes this block to `manus_data_publisher`. Normal hand teleoperation starts both robot hand controllers; the MANUS publisher handles both connected gloves.
+Each parameter accepts a filename in the package calibration directory or an absolute file path. An empty string selects that side's canonical filename. Use the correct profile for the operator and glove side.
 
-To run only the glove publisher with profile overrides, from the repository root:
+For the publisher alone, without robot drivers:
 
 ```bash
 source tools/env.sh
-ros2 run manus_ros2 manus_data_publisher --ros-args \
-  -p left_calibration_file:=/absolute/path/to/left-profile.mcal \
-  -p right_calibration_file:=/absolute/path/to/right-profile.mcal
-```
-
-This standalone command starts no robot drivers. The normal `wuji_teleop.launch.py` launch automatically enables hands and arms by default; it is not needed to load or create a MANUS calibration profile.
-
-## Build and load behavior
-
-From the repository root:
-
-```bash
-source tools/env.sh
-colcon build --packages-select manus_ros2_msgs manus_ros2 --symlink-install
-source install/setup.bash
 ros2 run manus_ros2 manus_data_publisher
 ```
 
-See [Local environment setup](../../../../docs/LOCAL_SETUP.md) for SDK libraries, USB rules and the workspace environment. Both MANUS executables use `ManusSDK/lib/libManusSDK_Integrated.so`.
+Standalone parameter overrides use standard ROS syntax:
 
-For each detected side, the publisher opens the selected file, checks that it is nonempty and reads it in full, then calls `CoreSdk_SetGloveCalibration`. It marks that side as loaded when the calibration result is `SetGloveCalibrationReturnCode_Success`. There is no 16 MiB file-size cap in the publisher.
+```bash
+ros2 run manus_ros2 manus_data_publisher --ros-args \
+  -p left_calibration_file:=LeftMetaglovePro.mcal \
+  -p right_calibration_file:=RightMetaglovePro.mcal
+```
 
-A failed load is logged and retried on subsequent publication ticks until it succeeds. Skeleton publication continues independently of calibration success. Once successful, loading is skipped for that side for the rest of the process lifetime. Restart the publisher after changing a file or its configured path. An explicitly selected absolute source-file path needs no rebuild; rebuild to update packaged copies when using an install without symlinks.
+The project's [setup command](../../../../docs/LOCAL_SETUP.md) builds both MANUS executables and prepares their native library and USB access.
 
-The publication timer repeats the latest cached skeleton, even when no new SDK callback arrives. The message stamp and sequence describe the callback that supplied the cache; they are not publication freshness checks. A running topic alone does not establish that a profile loaded successfully or that a new glove sample arrived. Check the publisher's calibration result message for the intended side.
+## Inspect a glove
 
-## Inspect or create a profile
+Stop other MANUS clients before running the tool. Before calibration, stop teleoperation and confirm that robot motors are disabled. The tool targets the explicit glove ID, checks its side and paired state, and makes no robot-control calls.
 
-`manus_calibrate` operates on one explicitly selected glove ID. Stop other MANUS clients before running it. Stop teleoperation and confirm robot motors are disabled before calibration; the tool has no robot-control calls and does not verify motor state itself.
-
-Inspection is the default mode. Replace the example ID with the intended glove's ID, expressed as decimal or `0x` hexadecimal:
+Replace the example with the intended glove's ID in decimal or `0x` hexadecimal form:
 
 ```bash
 source tools/env.sh
 ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right --inspect
 ```
 
-The tool verifies the selected glove's side and paired state, prints the SDK calibration step titles, instructions and durations, and lists the raw node hierarchy by node ID. Discovery waits up to 20 seconds; hierarchy retrieval waits up to 10 seconds. Inspection makes no calibration Start, StartStep, Finish or SetGloveCalibration call. The tool suppresses raw SDK output and prints its own selected fields.
+Inspection is also the default when no mode is supplied. It prints the SDK step indices, titles, pose instructions, durations, and raw node hierarchy. Discovery waits up to 20 seconds and hierarchy retrieval up to 10 seconds. Inspection does not start or apply calibration. The tool suppresses raw SDK output and displays its own selected fields.
 
-To create a new profile:
+## Calibrate and save
 
 ```bash
 ros2 run manus_ros2 manus_calibrate --glove-id 0x0DB2AEBE --side right \
   --calibrate --robots-disabled
 ```
 
-`--output` is optional: the default is `LeftMetaglovePro.mcal` for `--side left`, or `RightMetaglovePro.mcal` for `--side right`. To choose another filename, add `--output right-new.mcal`, without a directory or absolute path. The output directory is independent of any existing profile. With `--symlink-install`, it is fixed at build time to the package's source calibration directory, and the example writes to:
+`--robots-disabled` is the operator's declaration; the tool does not query motor state. Follow the displayed SDK instructions:
 
-```text
-src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal
-```
-
-A regular install uses the package-share calibration directory. Successful export replaces an existing file of the same name; cancellation or an incomplete export leaves the existing file unchanged. The tool does not import the publisher's configured profile before calibration.
-
-Follow the prompts in order:
-
-1. Enter `start <decimal glove ID>` to begin.
-2. Prepare the pose described by the SDK, then enter `step <index>` for each step.
+1. Enter `start <decimal glove ID>` when ready to begin.
+2. Prepare each requested pose, then enter `step <index>`.
 3. Enter `finish <decimal glove ID>` to apply the result in Core and export the profile.
 
-Use the decimal ID printed by the tool in interactive confirmations, even if the command-line ID was hexadecimal. Any other prompt input or EOF cancels. Ctrl-C and SIGTERM also request cancellation, including while waiting for an incomplete input line. A blocking SDK step must return before cancellation can call Stop. A negative SDK step duration denotes a continuous step with an estimated duration.
+Use the decimal ID printed by the tool in interactive confirmations even if the command-line ID was hexadecimal. Negative step durations denote continuous SDK steps with an estimated duration. Keep following the displayed pose instructions until each SDK step returns.
 
-After Start and before Finish, cancellation requests the SDK Stop operation and does not apply the result through Finish. Cancelling before Start performs no Stop call. Successful Finish applies and saves calibration in Core, then the tool exports the bytes to the selected file with owner-only permissions. If export fails after Finish, Core has already applied the result; the tool reports that distinction.
+The default output is `LeftMetaglovePro.mcal` for `--side left` and `RightMetaglovePro.mcal` for `--side right`. In the project symlink build it is written into the source `calibration` directory above. A regular install uses the package-share directory. `--output FILENAME` optionally chooses another filename in that directory; directory and absolute paths are rejected.
 
-Set the matching `manus.left_calibration_file` or `manus.right_calibration_file` to the completed export's absolute path printed by the tool, then restart the publisher. The loader is unchanged: use the absolute path even though the calibration CLI accepts only a filename. Otherwise startup reloads the previously configured profile. The calibration tool retains its own export-size limit of 16 MiB; this is separate from the publisher's file-loading behavior.
+A successful export replaces an existing file of the same name with owner-only permissions. Cancellation or an incomplete export leaves the existing file unchanged. The tool does not import an existing profile before calibration. After saving the canonical filename, restart the publisher to use it. If another filename was supplied, select it in the matching `manus.left_calibration_file` or `manus.right_calibration_file` parameter and restart. A symlink build needs no rebuild after replacing a profile.
 
-## Calibration load results
+Any other confirmation input or EOF cancels. Ctrl-C and SIGTERM also request cancellation while waiting for input, including an incomplete line. After Start, cancellation calls the SDK Stop operation; an in-flight blocking SDK step must return first. Cancellation before Start performs no Stop call.
 
-The SDK declares these `SetGloveCalibrationReturnCode` values:
+Finish applies and saves calibration in Core before export. If export subsequently fails, Core has already applied the result and the tool reports that distinction. Export is limited to 16 MiB.
 
-| Result | Meaning |
+## Verify loading
+
+For each detected side, the publisher reads the selected nonempty file in full and calls `CoreSdk_SetGloveCalibration`. It records the side as loaded only after `SetGloveCalibrationReturnCode_Success`. Failed loads are logged and retried on publication ticks. Skeleton publication continues independently of loading.
+
+| SDK result | Meaning |
 | --- | --- |
 | `Success` | Calibration loaded |
 | `WrongSideError` | Profile side does not match the glove |
@@ -131,4 +90,6 @@ The SDK declares these `SetGloveCalibrationReturnCode` values:
 | `DeserializationError` | Calibration data could not be deserialized |
 | `Error` | Generic calibration error |
 
-The publisher logs the numeric calibration result on failure. File-not-found, empty-file and incomplete-read messages occur before calibration is sent to the SDK. Keep left and right paths distinct and restart the publisher after correcting a path or replacing a profile.
+The publisher logs numeric SDK results on failure. File-not-found, empty-file, and incomplete-read errors occur before the SDK call. Check the success log for the intended side, then validate raw poses with robot motors disabled. A running topic alone does not establish that calibration loaded or that a new sample arrived: the publisher repeats its latest cached skeleton.
+
+A successful profile loads once per side for the process lifetime. Restart after changing its path or contents. With a regular install, rebuild to update installed profile copies; an explicitly configured absolute path is read directly.

@@ -27,8 +27,6 @@ def main():
                 run("git", "sparse-checkout", "init", "--cone", cwd=path)
                 run("git", "sparse-checkout", "set", *spec["sparse_paths"], cwd=path)
             run("git", "checkout", "--detach", spec["commit"], cwd=path)
-        if spec.get("submodule"):
-            run("git", "submodule", "update", "--init", "--recursive", "--", spec["submodule"], cwd=path)
         print(f"{name}: {spec['commit']}")
 
 
