@@ -15,6 +15,22 @@ ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-arm
 
 The command starts both hands and MANUS, enables the hand drivers, and begins following after the three-second preparation interval. Add `--home` to send the configured Home positions and exit without MANUS. See the [operating commands](../../../README.md#start-teleoperation) for combined mode, monitor, and services.
 
+Both hands use `WujiHand2ControllerNode` with the node name `controller`. Their namespaces come from `left_hand.name` and `right_hand.name` in the hand configuration:
+
+| Hand | Controller node | Driver node |
+| --- | --- | --- |
+| Left | `/left_hand/controller` | `/left_hand/wujihand2_driver` |
+| Right | `/right_hand/controller` | `/right_hand/wujihand2_driver` |
+
+The controller executable is `wujihand2_controller`. Its `--side` argument selects the hand model and MANUS input side; `--hand-name` sets its default namespace and hand topic prefix. Commands, feedback, and lifecycle topics use the hand namespace, such as `/left_hand/joint_commands`. MANUS inputs and the arm readiness topic remain global.
+
+Query each controller's parameters while teleoperation is running:
+
+```bash
+ros2 param list /left_hand/controller
+ros2 param list /right_hand/controller
+```
+
 The driver executable is `wujihand2_driver`. Its parameters are:
 
 | Parameter | Node default | Meaning |

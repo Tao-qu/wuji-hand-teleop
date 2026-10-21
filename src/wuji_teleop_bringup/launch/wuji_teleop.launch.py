@@ -52,7 +52,7 @@ def _nodes(context):
             if not options.home:
                 nodes.append(Node(
                     package="controller", executable="wujihand2_controller",
-                    name=f"wujihand2_controller_{side}", output="screen",
+                    name="controller", namespace=name, output="screen",
                     parameters=[dict(config.get("controller", {}),
                                      wait_for_arm=arm, startup_wait_sec=3.0)],
                     arguments=["--side", side, "--hand-name", name]))

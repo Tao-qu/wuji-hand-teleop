@@ -20,7 +20,7 @@ class WujiHand2ControllerNode(Node):
     """Consume the latest MANUS message once per control tick."""
 
     def __init__(self, side: str, hand_name: str):
-        super().__init__(f"wujihand2_controller_{side}")
+        super().__init__("controller", namespace=hand_name)
         self._side = side
         self.declare_parameter("control_rate", 120.0)
         self.declare_parameter("flip_y", False)
