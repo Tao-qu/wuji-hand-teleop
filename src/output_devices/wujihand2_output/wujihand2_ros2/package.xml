@@ -6,7 +6,6 @@
   <description>Wuji Hand 2 SDK driver, official retargeting and ROS command interface</description>
   <maintainer email="support@wuji.tech">Teleoperation maintainers</maintainer>
   <license>MIT</license>
-  <buildtool_depend>ament_python</buildtool_depend>
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
