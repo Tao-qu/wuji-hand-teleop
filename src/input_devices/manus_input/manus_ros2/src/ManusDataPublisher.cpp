@@ -92,7 +92,6 @@ ClientReturnCode ManusDataPublisher::InitializeSDK()
         return ClientReturnCode::ClientReturnCode_FailedToInitialize;
     
     SDKReturnCode t_InitializeResult = SDKReturnCode_Error;
-    bool t_Remote = m_ConnectionType != ConnectionType::ConnectionType_Integrated;
     
     if(m_ConnectionType == ConnectionType::ConnectionType_Integrated){
         t_InitializeResult = CoreSdk_InitializeIntegrated();

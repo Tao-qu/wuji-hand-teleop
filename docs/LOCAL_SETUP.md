@@ -44,8 +44,7 @@ For a source-only rebuild after setup:
 ```bash
 source tools/env.sh
 python3 -m colcon build --symlink-install \
-  --cmake-args -DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python3" \
-               -DPYTHON_EXECUTABLE="$VIRTUAL_ENV/bin/python3"
+  --cmake-args -DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python3"
 source tools/env.sh
 python3 tools/check_environment.py --mode all
 ```

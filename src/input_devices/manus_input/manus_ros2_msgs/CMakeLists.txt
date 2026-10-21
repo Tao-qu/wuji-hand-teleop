@@ -7,6 +7,8 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+# Humble message generation uses the legacy Python variable.
+set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)

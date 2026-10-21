@@ -74,8 +74,7 @@ python3 -m colcon --log-base "$TELEOP_SETUP_ROOT/log" build \
     --install-base "$TELEOP_SETUP_ROOT/install" \
     --symlink-install --parallel-workers 2 --event-handlers console_cohesion+ \
     --cmake-args -DBUILD_TESTING=OFF \
-        -DPython3_EXECUTABLE="$TELEOP_SETUP_ROOT/.venv/bin/python3" \
-        -DPYTHON_EXECUTABLE="$TELEOP_SETUP_ROOT/.venv/bin/python3"
+        -DPython3_EXECUTABLE="$TELEOP_SETUP_ROOT/.venv/bin/python3"
 source tools/env.sh
 python3 tools/check_environment.py --mode all
 printf '\nReady. Review the two device YAMLs, then source tools/env.sh in each terminal.\n'
