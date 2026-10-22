@@ -4,6 +4,8 @@
 
 Use Ubuntu 22.04 x86_64 with system Python 3.10, Git, and ROS 2 Humble Desktop installed under `/opt/ros/humble`. The [ROS 2 Humble installation guide](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html) describes the ROS package sources and installation.
 
+This page covers the desktop robot workspace (`./tools/setup.sh --profile teleop`, the default). The Jetson camera workspace has separate dependencies and build outputs; see [Cameras](CAMERAS.md) for `--profile camera` and remote deployment.
+
 Prepare device requirements separately:
 
 - MANUS gloves and receivers with vendor SDK licensing. Setup installs the repository's USB rules and adds the current user to `plugdev` and `dialout`.
@@ -44,6 +46,8 @@ For a source-only rebuild after setup:
 ```bash
 source tools/env.sh
 python3 -m colcon build --symlink-install \
+  --base-paths src/input_devices src/output_devices src/controller \
+    src/wuji_teleop_bringup src/wuji_teleop_monitor \
   --cmake-args -DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python3"
 source tools/env.sh
 python3 tools/check_environment.py --mode all
@@ -59,7 +63,7 @@ The cabinet address is configured in `tianji_chest.yaml`. The control wrapper se
 
 ## Configuration reference
 
-The five runtime configuration and calibration files are local and ignored by Git:
+The five teleoperation configuration and calibration files are local and ignored by Git:
 
 - `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml`
 - `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`
@@ -67,7 +71,7 @@ The five runtime configuration and calibration files are local and ignored by Gi
 - `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal`
 - `src/input_devices/openvr_input/calibration/tracker.yaml`
 
-Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py` copies only missing files, preserving existing configuration and calibration. The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --check` reports missing files among all five runtime files without writing.
+Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py --profile teleop` copies only missing files, preserving existing configuration and calibration. The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --profile teleop --check` reports missing files among these five runtime files without writing. Use `--profile camera` for camera settings or omit `--profile` to include both sets.
 
 The source files are the editable configuration for a symlink build. Teleoperation and Home use these default hand and arm configurations. Preview and standalone OpenVR also support an explicit `arm_config` launch argument. A regular install reads its package-share configuration copies.
 

@@ -7,6 +7,7 @@
 - [SteamVR, five Trackers, and neutral-pose calibration](STEAMVR.md)
 - [Tracker wearing guide](tracker-wearing-guide.md)
 - [Wuji Hand 2.2 ROS adapter](../src/output_devices/wujihand2_output/README.md)
+- [Jetson camera streams, configuration, and deployment](CAMERAS.md)
 - [Tianji arm redundancy reference](../src/output_devices/tianji_output/tianji_output/tianji_intro.md)
 - [Tianji SDK reference](../src/output_devices/tianji_output/tianji_output/fx.pdf)
 - [Current release](../CHANGELOG.md)

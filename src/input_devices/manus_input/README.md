@@ -6,7 +6,7 @@
 
 Run the project's [one-command setup](../../../docs/LOCAL_SETUP.md) to fetch native libraries, install USB rules, and build the ROS packages. Both MANUS executables use the bundled `ManusSDK/lib/libManusSDK_Integrated.so`. Complete MANUS SDK licensing through the vendor's process.
 
-The runtime profiles are `manus_ros2/calibration/LeftMetaglovePro.mcal` and `manus_ros2/calibration/RightMetaglovePro.mcal`. They are local and ignored by Git. The adjacent `.mcal.template` files are tracked, complete binary profiles. Setup or `python3 tools/configure.py` copies a template only when its runtime profile is missing. Use the calibration tool to update profiles; the binary templates are not editable text. Select the runtime profiles in the local hand configuration:
+The runtime profiles are `manus_ros2/calibration/LeftMetaglovePro.mcal` and `manus_ros2/calibration/RightMetaglovePro.mcal`. They are local and ignored by Git. The adjacent `.mcal.template` files are tracked, complete binary profiles. Setup or `python3 tools/configure.py --profile teleop` copies a template only when its runtime profile is missing. Use the calibration tool to update profiles; the binary templates are not editable text. Select the runtime profiles in the local hand configuration:
 
 ```yaml
 manus:

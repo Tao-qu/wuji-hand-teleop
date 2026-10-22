@@ -53,7 +53,7 @@ Match the five serials to `openvr.tracker_serials` in `src/output_devices/tianji
 
 The supplied configuration contains the supplied installation's serials. Assign your actual hardware and keep each serial unique. Leave `openvr.calibration_file: tracker.yaml` to use the canonical profile in `src/input_devices/openvr_input/calibration`.
 
-`tracker.yaml` is local and ignored by Git. Its adjacent `tracker.yaml.template` is tracked. Setup or `python3 tools/configure.py` copies the template only when the runtime file is missing, preserving an existing calibration.
+`tracker.yaml` is local and ignored by Git. Its adjacent `tracker.yaml.template` is tracked. Setup or `python3 tools/configure.py --profile teleop` copies the template only when the runtime file is missing, preserving an existing calibration.
 
 ## Neutral-pose calibration
 

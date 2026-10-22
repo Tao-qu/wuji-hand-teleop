@@ -2,6 +2,8 @@
 
 A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. Two MANUS gloves supply finger motion; five HTC Vive Trackers supply chest, hand-back, and upper-arm poses. Finger retargeting and hand communication use the official `wuji-sdk==2026.10.12`. RViz uses the official Hand 2.2 model.
 
+Jetson camera capture provides four separate GMSL images and D435 color/depth streams. Camera acquisition can run independently of teleoperation. Dataset recording and policy inference are not implemented yet.
+
 ## Hardware and modes
 
 | Mode | Input | Output |
@@ -26,7 +28,7 @@ cd wuji-hand-teleop
 ./tools/setup.sh
 ```
 
-Setup fetches Git LFS assets and the pinned official model, creates `.venv`, installs Python and ROS dependencies, prepares local configuration, builds with `--symlink-install`, and checks the environment. It installs required system packages and MANUS USB access rules through `sudo`. Running it again preserves existing local configuration. Use `--skip-system` when system dependencies and USB permissions are already managed, or `--skip-build` to prepare dependencies without building.
+Setup fetches Git LFS assets and the pinned official model, creates `.venv`, installs Python and ROS dependencies, prepares local configuration, builds the desktop robot packages with `--symlink-install`, and checks the environment. It installs required system packages and MANUS USB access rules through `sudo`. Running it again preserves existing local configuration. Use `--skip-system` when system dependencies and USB permissions are already managed, or `--skip-build` to prepare dependencies without building. For the separate Jetson camera workspace, use `./tools/setup.sh --profile camera`; see [camera deployment](docs/CAMERAS.md).
 
 Load the environment in every terminal used for this project:
 
@@ -36,7 +38,7 @@ source tools/env.sh
 
 ### Configuration
 
-The workspace uses one hand configuration, one arm configuration, and three calibration files:
+Teleoperation uses one hand configuration, one arm configuration, and three calibration files:
 
 | File | Purpose |
 | --- | --- |
@@ -46,7 +48,7 @@ The workspace uses one hand configuration, one arm configuration, and three cali
 | `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal` | Right MANUS calibration |
 | `src/input_devices/openvr_input/calibration/tracker.yaml` | Chest transforms, hand-back orientation alignment, and upper-arm mounting rotations |
 
-All five runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py` copies only missing files and preserves existing configuration and calibration. `python3 tools/configure.py --check` checks that all five runtime files exist without writing.
+All five runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py --profile teleop` copies only missing files and preserves existing configuration and calibration. Add `--check` to check that these five files exist without writing. The camera profile initializes its own configuration and four intrinsic-calibration files; `configure.py` without a profile processes both sets.
 
 Templates describe the supplied installation; the `.mcal.template` files are complete binary profiles, not editable text. Check serial numbers, cabinet IP, mounting dimensions, and operator calibration for your hardware before operation. Edit the source configuration files and use the calibration tools to update profiles; the symlink build makes them available to ROS.
 
@@ -149,6 +151,8 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 | `src/output_devices/tianji_output/` | Shared Tianji ROS driver, pure kinematics, and tool parameters |
 | `src/wuji_teleop_bringup/` | Teleoperation, Home, Preview, and static transforms |
 | `src/wuji_teleop_monitor/` | Qt monitor and brake tool |
+| `src/camera/gmsl_camera/` | Four full-resolution GMSL streams and optional JPEG previews |
+| `src/camera/camera_bringup/` | Jetson camera configuration, initialization, and GMSL/D435 launch |
 | `tools/` | Setup, environment, configuration, and dependency tools |
 
 ### Shared robot interfaces
@@ -171,6 +175,30 @@ The joint topics use `sensor_msgs/msg/JointState`. Arm command names are `left_j
 All joint ROS interfaces use radians; arm Home configuration and the native Tianji SDK use degrees. The monitor converts arm feedback to degrees for display. Submission timestamps identify SDK submission, not physical arrival. Hand feedback is stamped in the SDK receive callback; arm feedback is stamped when reading the SDK cache, which may repeat a hardware sample. `/left_arm/ee_pose` and `/right_arm/ee_pose` remain Tracker target TCP arrays in metres/degrees, not measured end-effector poses.
 
 The arm driver provides `/tianji_arm/set_enabled`, `/tianji_arm/set_arm_state`, and `/tianji_arm/{left,right}/{brake,clear_error}` (`SetBool`), plus `/tianji_arm/home` and `/tianji_arm/arm_status` (`Trigger`). An external command source can reuse these hardware interfaces without starting MANUS, OpenVR, or retargeting. Each session selects a single command source.
+
+## Jetson cameras
+
+Deploy the camera source and build it on the Jetson:
+
+```bash
+./tools/deploy_camera.sh --user-deps
+```
+
+This uses the existing Jetson native dependencies and downloads missing ROS camera packages into a local prefix. The default destination is `nvidia@6.6.7.100:/home/nvidia/Workspace/wuji-hand-teleop`. For a new Jetson, install the prerequisites described in [Cameras](docs/CAMERAS.md) first.
+
+On the Jetson, stop the existing GMSL application before starting capture:
+
+```bash
+sudo systemctl stop tj-camera-stream.service
+cd ~/Workspace/wuji-hand-teleop
+source install_camera/camera_env.sh
+ros2 run camera_bringup init_gmsl.sh
+ros2 launch camera_bringup cameras.launch.py
+```
+
+`/cameras/gmsl` publishes independent `head_left`, `head_right`, `left_wrist`, and `right_wrist` images, each at 2560 × 1984 with 30 fps requested. `/cameras/d435` uses the official RealSense driver for 1280 × 720 color and depth at 30 fps. Ctrl-C stops both processes. `gmsl:=false` or `d435:=false` selects one camera family.
+
+Keep full-resolution capture and recording on the Jetson: the four GMSL RGB streams alone would require about 14.6 Gbit/s at 30 fps. Desktop viewers can use `/cameras/<role>/preview/compressed`. See [camera topics, configuration, timestamps, and deployment](docs/CAMERAS.md) for details.
 
 ## Environment checks and documentation
 

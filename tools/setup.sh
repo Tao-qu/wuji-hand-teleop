@@ -5,13 +5,25 @@ set -eo pipefail
 TELEOP_SETUP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 skip_system=false
 skip_build=false
-for option in "$@"; do
+user_deps=false
+profile=teleop
+forward_options=()
+while [[ $# -gt 0 ]]; do
+    option="$1"
     case "$option" in
-        --skip-system) skip_system=true ;;
-        --skip-build) skip_build=true ;;
+        --profile)
+            if [[ $# -lt 2 ]]; then
+                printf '%s\n' '--profile requires teleop or camera' >&2; exit 2
+            fi
+            profile="$2"
+            shift ;;
+        --skip-system) skip_system=true; forward_options+=("$option") ;;
+        --skip-build) skip_build=true; forward_options+=("$option") ;;
+        --user-deps) user_deps=true; forward_options+=("$option") ;;
         --help|-h)
             cat <<'USAGE'
-Usage: ./tools/setup.sh [--skip-system] [--skip-build]
+Usage: ./tools/setup.sh [--profile teleop|camera] [--skip-system] [--skip-build]
+                        [--user-deps]
 
 Install project dependencies, fetch SDK/model assets, create missing local
 configuration and calibration files, build the ROS workspace, and check the
@@ -20,11 +32,23 @@ Existing configuration and calibration files are preserved.
 
   --skip-system  Skip apt, rosdep, USB rules, and group changes.
   --skip-build   Prepare dependencies and configuration without building.
+  --profile      teleop (default): desktop robot workspace; camera: Jetson cameras.
+  --user-deps    Camera only: use a private ROS dependency prefix without sudo.
 USAGE
             exit 0 ;;
         *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
     esac
+    shift
 done
+
+case "$profile" in
+    camera) exec bash "$TELEOP_SETUP_ROOT/tools/setup_camera.sh" "${forward_options[@]}" ;;
+    teleop)
+        if "$user_deps"; then
+            printf '%s\n' '--user-deps requires --profile camera' >&2; exit 2
+        fi ;;
+    *) printf 'Unknown setup profile: %s\n' "$profile" >&2; exit 2 ;;
+esac
 
 if [[ "$(uname -m)" != x86_64 || ! -f /opt/ros/humble/setup.bash ]]; then
     printf 'Install ROS 2 Humble on Ubuntu 22.04 x86_64 first. See docs/LOCAL_SETUP.md.\n' >&2
@@ -55,13 +79,14 @@ fi
 git lfs install --local
 git lfs pull
 /usr/bin/python3 tools/fetch_dependencies.py
-/usr/bin/python3 tools/configure.py
+/usr/bin/python3 tools/configure.py --profile teleop
 /usr/bin/python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install 'pip>=23,<27' 'setuptools==68.2.2' 'wheel==0.45.1'
 .venv/bin/python -m pip install -r requirements.txt
 
+teleop_sources=(src/input_devices src/output_devices src/controller src/wuji_teleop_bringup src/wuji_teleop_monitor)
 if ! "$skip_system"; then
-    rosdep install --from-paths src --ignore-src --rosdistro humble -y
+    rosdep install --from-paths "${teleop_sources[@]}" --ignore-src --rosdistro humble -y
 fi
 
 if "$skip_build"; then
@@ -71,6 +96,7 @@ fi
 
 source tools/env.sh
 python3 -m colcon --log-base "$TELEOP_SETUP_ROOT/log" build \
+    --base-paths "${teleop_sources[@]}" \
     --build-base "$TELEOP_SETUP_ROOT/build" \
     --install-base "$TELEOP_SETUP_ROOT/install" \
     --symlink-install --parallel-workers 2 --event-handlers console_cohesion+ \
