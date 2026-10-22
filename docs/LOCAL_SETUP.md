@@ -27,7 +27,7 @@ Setup performs the following steps:
 
 1. Installs required system packages, MANUS USB rules, and device-access groups.
 2. Fetches Git LFS assets and the official model revision in `dependencies.lock.json`.
-3. Creates missing local hand and arm configurations and three calibration files from their templates.
+3. Creates missing local hand, arm, and OpenVR input configurations and three calibration files from their templates.
 4. Creates a Python 3.10 `.venv` with system packages available and installs `requirements.txt`.
 5. Resolves ROS dependencies, builds the workspace with `--symlink-install`, and checks the environment.
 
@@ -63,17 +63,18 @@ The cabinet address is configured in `tianji_chest.yaml`. The control wrapper se
 
 ## Configuration reference
 
-The five teleoperation configuration and calibration files are local and ignored by Git:
+The six teleoperation configuration and calibration files are local and ignored by Git:
 
 - `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml`
 - `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml`
+- `src/input_devices/openvr_input/config/openvr.yaml`
 - `src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal`
 - `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal`
 - `src/input_devices/openvr_input/calibration/tracker.yaml`
 
-Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py --profile teleop` copies only missing files, preserving existing configuration and calibration. The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --profile teleop --check` reports missing files among these five runtime files without writing. Use `--profile camera` for camera settings or omit `--profile` to include both sets.
+Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py --profile teleop` copies only missing files, preserving existing configuration and calibration. The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --profile teleop --check` reports missing files among these six runtime files without writing. Use `--profile camera` for camera settings or omit `--profile` to include both sets.
 
-The source files are the editable configuration for a symlink build. Teleoperation and Home use these default hand and arm configurations. Preview and standalone OpenVR also support an explicit `arm_config` launch argument. A regular install reads its package-share configuration copies.
+The source files are the editable configuration for a symlink build. Teleoperation and Home use the default hand and arm configurations; arm teleoperation also uses the OpenVR input configuration. Preview and standalone OpenVR support an explicit `input_config` launch argument. A regular install reads its package-share configuration copies.
 
 ### Hands and MANUS
 
@@ -90,13 +91,14 @@ The source files are the editable configuration for a symlink build. Teleoperati
 | `controller.flip_y` | Optional Y reflection; supplied value `false` preserves right-handed MANUS XYZ |
 | `manus.left_calibration_file`, `manus.right_calibration_file` | Calibration filenames or absolute paths |
 
-Bringup sets `auto_enable: true` for selected hand drivers. The canonical profiles are `LeftMetaglovePro.mcal` and `RightMetaglovePro.mcal` in `src/input_devices/manus_input/manus_ros2/calibration`. An empty parameter selects the corresponding canonical file. Preview uses the same configured MANUS profiles. See [MANUS calibration](../src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md).
+Bringup sets `auto_enable: true` for selected hand drivers. The canonical profiles are `LeftMetaglovePro.mcal` and `RightMetaglovePro.mcal` in `src/input_devices/manus_input/manus_ros2/calibration`. An empty parameter selects the corresponding canonical file. Preview uses the same configured MANUS profiles and `controller.flip_y` setting as live retargeting. See [MANUS calibration](../src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md).
 
-### Arms and Tracker input
+### Arms
 
 | Field | Meaning |
 | --- | --- |
 | `left_arm.home_joints`, `right_arm.home_joints` | Seven joint positions per arm in degrees |
+| `left_arm.base_from_body`, `right_arm.base_from_body` | 3×3 rotations mapping common robot body axes (X forward, Y left, Z up) into each arm base |
 | `driver.robot_ip` | Cabinet SDK endpoint |
 | `driver.kinematics_model` | Filename in the Tianji package `config` directory, or an absolute path |
 | `driver.tool_transforms.left`, `.right` | Flange-to-robot-palm TCP 4×4 transforms, translation in millimetres |
@@ -105,9 +107,6 @@ Bringup sets `auto_enable: true` for selected hand drivers. The canonical profil
 | `controller.state_publish_rate` | Feedback publication rate in Hz; supplied value 500 |
 | `controller.home_duration_sec` | Home trajectory duration in seconds; supplied value 8 |
 | `controller.handoff_hold_sec`, `handoff_ramp_sec` | Measured-pose hold and blend into Tracker following, in seconds |
-| `openvr.tracker_serials` | Distinct serials for `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, `right_arm` |
-| `openvr.publish_rate_hz`, `publish_tf`, `parent_frame` | Tracker publication rate, TF switch, and world frame |
-| `openvr.calibration_file` | Runtime Tracker calibration filename or absolute path; supplied value `tracker.yaml` |
 
 The supplied arm Home is left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Normal startup enters position mode, moves Home, then enters joint-impedance mode. The launch preparation interval is fixed at three seconds. Disable requests standby while keeping the connection. The shared `/tianji_arm/driver` owns the connection and serializes SDK operations; an enable or disable request waits for an operation already running. `/tracker_arm_retarget` reads TF and publishes palm targets and upper-arm directions. `/tianji_arm_controller` runs pure local IK from those typed messages, measured joint feedback, and driver lifecycle state.
 
@@ -128,24 +127,39 @@ The left/right 50 mm displacement describes the human glove-mounted hand-back Tr
 
 The supplied values model each Hand 2.2 in its zero pose with the supplied mount, approximately 0.688 kg per side. Additional cabling and mounting parts are excluded. The conversion assumes coincident mount and flange origins and a mount-to-flange rotation of `diag(1, -1, -1)`. For a different mounting, transform the COM and inertia into the flange frame, including a parallel-axis shift if the origins differ. The driver passes the configured arrays to the SDK without unit conversion.
 
-### Tracker calibration
+### OpenVR input
 
-`src/input_devices/openvr_input/calibration/tracker.yaml` is the canonical profile. Its fields are:
+`src/input_devices/openvr_input/config/openvr.yaml` contains these top-level fields:
 
 | Field | Meaning |
 | --- | --- |
-| `chest_mount.shared` | Shared chest translation in metres |
-| `chest_mount.left`, `.right` | Per-side roll, pitch, yaw in radians and local translation in metres |
-| `hand_back_to_palm.left`, `.right` | `qx`, `qy`, `qz`, `qw` orientation alignment plus `tracker_offset_m`: palm-to-Tracker displacement, in metres, expressed in aligned human palm axes |
-| `upper_arm_rotations.left_arm`, `.right_arm` | 3×3 rotations whose columns are calibrated axes in the raw Tracker frame |
+| `tracker_serials` | Distinct serials for `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, `right_arm` |
+| `publish_rate_hz` | Tracker publication rate in Hz; supplied value 120 |
+| `publish_tf` | Publish Tracker and anatomical palm TF; supplied value `true` |
+| `parent_frame` | World frame; supplied value `world` |
+| `calibration_file` | Runtime Tracker profile filename or absolute path; supplied value `tracker.yaml` |
 
-The supplied `tracker_offset_m` vectors are `[0, -0.05, 0]` on the left and `[0, 0.05, 0]` on the right. They describe the vector from the human palm to the Tracker origin, not coordinates in the raw Tracker axes. At runtime the static TF from `{side}_hand_back` to `{side}_human_palm` uses the quaternion rotation `R` and translation `-R @ tracker_offset_m`. The retargeting node maps that corrected palm pose through the calibrated chest reference into the corresponding robot arm base. The calibrated upper-arm Y axes supply unit directions for IK; upper-arm Tracker positions are unused.
+These input settings are independent of the robot arm configuration. The runtime OpenVR node loads this file and its selected human calibration profile without loading robot Home, tool geometry, or kinematics.
 
-Measure and edit the offsets in the calibration output profile before running calibration. `tracker_calibrate --calibrate` reads and saves `tracker.yaml`, or the filename supplied with `--output`; a missing output file starts from the bundled `tracker.yaml.template`. This input choice is independent of the runtime `openvr.calibration_file` setting. Inspection always reads `tracker.yaml` with the same fallback.
+### Tracker calibration
 
-A static Home capture fits hand orientation first, then corrects the Tracker origins to human palm positions and fits local chest placement against robot palm forward kinematics. It preserves measured offsets, shared chest translation, and per-side chest rotation conventions while updating hand alignment, local chest placement, and upper-arm rotations. It cannot independently measure the 50 mm mounting distance. The tool reads Tracker serials, Home, and tool geometry from the local arm configuration and uses local forward kinematics without connecting to the cabinet.
+`src/input_devices/openvr_input/calibration/tracker.yaml` is the canonical human input profile. Its fields are:
 
-Recalibrate after changing tool geometry, Tracker mounting, or arm Home. The [Tracker calibration tool](STEAMVR.md#neutral-pose-calibration) saves the complete profile directly; a symlink build requires only a process restart after saving. MANUS profiles likewise take effect when their publisher restarts.
+| Field | Meaning |
+| --- | --- |
+| `chest_rotation` | 3×3 mounting rotation whose columns are human body axes in raw chest Tracker coordinates: X forward, Y left, Z up |
+| `hand_back_to_palm.left`, `.right` | `qx`, `qy`, `qz`, `qw` orientation of the anatomical palm in raw hand-back Tracker coordinates, plus `tracker_offset_m`: palm-to-Tracker displacement in palm axes, metres |
+| `neutral_pose.left.position_m`, `.right.position_m` | Captured neutral human palm positions in the human chest frame, metres |
+| `neutral_pose.left.quaternion_xyzw`, `.right.quaternion_xyzw` | Neutral anatomical palm orientations in the human chest frame |
+| `neutral_pose.left.upper_arm_quaternion_xyzw`, `.right.upper_arm_quaternion_xyzw` | Per-side mean raw upper-arm Tracker orientations at neutral, in the human chest frame |
+
+Both anatomical palms use X toward the fingers, Z toward the hand back, and Y = Z × X. Both supplied `tracker_offset_m` vectors are `[0, 0, 0.05]`. The static TF from `{side}_hand_back` to `{side}_human_palm` uses the quaternion rotation `R` and translation `-R @ tracker_offset_m`. The human chest origin remains at the raw chest Tracker, rather than an estimated shoulder position. Upper-arm Tracker positions are unused for IK; the saved raw orientation does not identify anatomical upper-arm twist.
+
+Measure and edit the offsets in the calibration output profile before running calibration. `tracker_calibrate --calibrate` reads and saves `tracker.yaml`, or the filename supplied with `--output`; a missing output file starts from the bundled `tracker.yaml.template`. This input choice is independent of `calibration_file` in `openvr.yaml`. Inspection always reads `tracker.yaml` with the same fallback.
+
+The CLI reads Tracker settings from `openvr.yaml` and robot Home and tool geometry from `tianji_chest.yaml`. It displays the locally computed Home reference without connecting to the cabinet. The input fit uses a symmetric, palms-down, fingers-forward human neutral pose to fit hand mounting rotations and record neutral palm poses and raw upper-arm orientations. It preserves the chest mounting rotation and measured offsets; a static capture cannot measure the mounting distance. Robot geometry does not enter this fit.
+
+At runtime, the retargeting controller uses `base_from_body` to map motion from the saved neutral pose onto robot Home, including the Home upper-arm reference direction. Restart teleoperation after changing robot Home or tool geometry to recompute this mapping and reload robot geometry. Recalibrate after changing Tracker mounting, updating measured offsets when needed. The [Tracker calibration tool](STEAMVR.md#neutral-pose-calibration) saves the complete input profile directly; a symlink build requires only a process restart after saving. MANUS profiles likewise take effect when their publisher restarts.
 
 ## Check and run
 

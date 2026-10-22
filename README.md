@@ -38,25 +38,26 @@ source tools/env.sh
 
 ### Configuration
 
-Teleoperation uses one hand configuration, one arm configuration, and three calibration files:
+Teleoperation uses hand, arm, and OpenVR input configurations, plus three calibration files:
 
 | File | Purpose |
 | --- | --- |
 | `src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml` | Hand serials and namespaces, Home positions, SDK rates and gains, MANUS parameters |
-| `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet address, arm Home and control settings, tool geometry and dynamics, five Tracker serials |
+| `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet address, arm Home and control settings, body-to-arm-base rotations, tool geometry and dynamics |
+| `src/input_devices/openvr_input/config/openvr.yaml` | Five Tracker serials, input publication settings, and selected Tracker profile |
 | `src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal` | Left MANUS calibration |
 | `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal` | Right MANUS calibration |
-| `src/input_devices/openvr_input/calibration/tracker.yaml` | Chest transforms, hand-back-to-palm alignment and measured offsets, and upper-arm mounting rotations |
+| `src/input_devices/openvr_input/calibration/tracker.yaml` | Human chest and palm mounting rotations, measured palm-to-Tracker offsets, and captured neutral poses |
 
-All five runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py --profile teleop` copies only missing files and preserves existing configuration and calibration. Add `--check` to check that these five files exist without writing. The camera profile initializes its own configuration and four intrinsic-calibration files; `configure.py` without a profile processes both sets.
+All six runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py --profile teleop` copies only missing files and preserves existing configuration and calibration. Add `--check` to check that these six files exist without writing. The camera profile initializes its own configuration and four intrinsic-calibration files; `configure.py` without a profile processes both sets.
 
 Templates describe the supplied installation; the `.mcal.template` files are complete binary profiles, not editable text. Check serial numbers, cabinet IP, mounting dimensions, and operator calibration for your hardware before operation. Edit the source configuration files and use the calibration tools to update profiles; the symlink build makes them available to ROS.
 
-The arm TCP is the robot palm, with identity flange-to-palm rotation and `[0, 0, 70]` mm translation on both sides. It is not a fingertip frame. The glove-mounted hand-back Trackers have separate offsets from the human palms: `hand_back_to_palm.left/right.tracker_offset_m` records palm-to-Tracker displacement in aligned human palm axes, supplied as `[0, -0.05, 0]` m on the left and `[0, 0.05, 0]` m on the right. Measure these offsets for the wearer and mounting, then [calibrate against arm Home](docs/STEAMVR.md#neutral-pose-calibration).
+The arm TCP is the robot palm, with identity flange-to-palm rotation and `[0, 0, 70]` mm translation on both sides. It is not a fingertip frame. The glove-mounted hand-back Trackers have separate offsets from the human palms: `hand_back_to_palm.left/right.tracker_offset_m` records palm-to-Tracker displacement in anatomical palm axes. Both palms use X toward the fingers, Z toward the hand back, and Y = Z × X; both supplied offsets are `[0, 0, 0.05]` m. Measure these offsets for the wearer and mounting, then [capture the human neutral pose with the arm Home reference](docs/STEAMVR.md#neutral-pose-calibration).
 
-`manus.left_calibration_file` and `manus.right_calibration_file` select the MANUS profiles by filename. `openvr.calibration_file: tracker.yaml` selects the runtime Tracker profile. Calibration filenames resolve in their respective package calibration directories; absolute paths are also supported. Teleoperation and Preview read the same MANUS settings.
+`manus.left_calibration_file` and `manus.right_calibration_file` select the MANUS profiles by filename. `calibration_file: tracker.yaml` in `openvr.yaml` selects the runtime Tracker profile. Calibration filenames resolve in their respective package calibration directories; absolute paths are also supported. Teleoperation and Preview read the same MANUS settings.
 
-Tracker calibration reads its output file, `tracker.yaml` by default or the filename passed to `--output`, independently of `openvr.calibration_file`. A missing output file starts from the bundled `tracker.yaml.template`; saving preserves the input profile's measured offsets. See [configuration fields and units](docs/LOCAL_SETUP.md#configuration-reference), [MANUS calibration](src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md), and [Tracker calibration](docs/STEAMVR.md#neutral-pose-calibration).
+Tracker calibration reads its output file, `tracker.yaml` by default or the filename passed to `--output`, independently of the runtime `calibration_file` selection. A missing output file starts from the bundled `tracker.yaml.template`; saving preserves the input profile's measured offsets. See [configuration fields and units](docs/LOCAL_SETUP.md#configuration-reference), [MANUS calibration](src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md), and [Tracker calibration](docs/STEAMVR.md#neutral-pose-calibration).
 
 ## Start teleoperation
 
@@ -84,7 +85,7 @@ ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-hand # Arms only
 | `--home` | Return selected devices Home, then exit |
 | `--help` | Show command usage |
 
-The two disable switches cannot be combined. Teleoperation and Home always use the local `wujihand2.yaml` and `tianji_chest.yaml`. Use `ros2 run` for these switches; native `ros2 launch` expects `name:=value` arguments. A bare `ros2 launch wuji_teleop_bringup wuji_teleop.launch.py` starts the default hands + arms mode.
+The two disable switches cannot be combined. Teleoperation and Home use the local `wujihand2.yaml` and `tianji_chest.yaml`; arm teleoperation also reads the local `openvr.yaml`. Use `ros2 run` for these switches; native `ros2 launch` expects `name:=value` arguments. A bare `ros2 launch wuji_teleop_bringup wuji_teleop.launch.py` starts the default hands + arms mode.
 
 Individual enable/disable services are also available:
 
@@ -129,7 +130,7 @@ ros2 launch wuji_teleop_bringup wuji_preview.launch.py
 
 Preview starts the configured MANUS profiles, five Trackers, Hand 2.2 target models, and RViz without actuator drivers. It uses `/preview/*` topics. The models show requested finger geometry, and Tracker axes show input poses. Labels describe the last received inputs and targets; they do not expire when input stops. Close RViz or press Ctrl-C to stop.
 
-Use `start_inputs:=false` to omit input readers or `enable_rviz:=false` to omit RViz. Preview and standalone OpenVR also accept `arm_config:=/absolute/path/to/tianji_chest.yaml`; the default is the project's local arm configuration.
+Use `start_inputs:=false` to omit input readers or `enable_rviz:=false` to omit RViz. Preview and standalone OpenVR also accept `input_config:=/absolute/path/to/openvr.yaml`; the default is the project's local OpenVR input configuration.
 
 ## Data flow and code layout
 
@@ -145,25 +146,31 @@ MANUS → manus_ros2 → 21 keypoints per hand
       ← /{side}_arm/joint_states ← /tianji_arm/driver
 ```
 
-Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark order and outputs 20 positions in radians in firmware order. `controller.flip_y: false` preserves the publisher's right-handed coordinates. Each hand has one persistent SDK retargeting session. MANUS and hand controllers run at 120 Hz by default; the enabled hand bridge sends its latest target at 200 Hz. See the [MANUS input contract](src/input_devices/manus_input/README.md#input-contract) and [hand ROS interfaces](src/output_devices/wujihand2_output/README.md).
+Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark order and outputs 20 positions in radians in firmware order. The controller owns MANUS-to-MediaPipe conversion. `controller.flip_y: false` preserves the publisher's right-handed coordinates; Preview uses the same configured setting as live retargeting. Each hand has one persistent SDK retargeting session. MANUS and hand controllers run at 120 Hz by default; the enabled hand bridge sends its latest target at 200 Hz. See the [MANUS input contract](src/input_devices/manus_input/README.md#input-contract) and [hand ROS interfaces](src/output_devices/wujihand2_output/README.md).
 
 | Directory | Implementation |
 | --- | --- |
 | `src/input_devices/manus_input/` | MANUS publisher, messages, and calibration |
 | `src/input_devices/openvr_input/` | Five-Tracker acquisition, calibration, and TF |
-| `src/controller/` | Hand retargeting, Tracker-to-palm arm targets, and arm IK |
+| `src/controller/` | MANUS keypoint conversion, hand retargeting, human-to-robot arm mapping, and arm IK |
 | `src/output_devices/wujihand2_output/wujihand2_ros2/` | Hand SDK adapter, retargeting, and configuration |
 | `src/output_devices/wujihand2_output/wuji-description/hand2/hand2_2/body/` | Pinned official Hand 2.2 model |
 | `src/output_devices/tianji_output/` | Shared Tianji ROS driver, pure kinematics, and tool parameters |
-| `src/wuji_teleop_bringup/` | Teleoperation, Home, Preview, and static transforms |
+| `src/wuji_teleop_bringup/` | Teleoperation, Home, and Preview launch composition |
 | `src/wuji_teleop_monitor/` | Qt monitor and brake tool |
 | `src/camera/gmsl_camera/` | Four full-resolution GMSL streams and optional JPEG previews |
 | `src/camera/camera_bringup/` | Jetson camera configuration, initialization, and GMSL/D435 launch |
 | `tools/` | Setup, environment, configuration, and dependency tools |
 
+### Coordinate boundaries
+
+OpenVR input owns human coordinates: the calibrated `chest` frame uses X forward, Y left, Z up, with its origin at the chest Tracker. It publishes raw hand-back and upper-arm Tracker frames plus static anatomical palm transforms. Its runtime node and mounting-fit math do not depend on robot geometry. The calibration CLI combines this input workflow with a locally computed robot Home reference for initial mapping.
+
+`/tracker_arm_retarget` maps chest-relative palm motion from the saved human neutral pose onto the configured robot palm Home. Each arm's `base_from_body` rotation maps common body axes into its base frame; upper-arm Tracker rotation relative to neutral rotates the robot's Home redundancy direction. Restart teleoperation after robot Home or tool changes to recompute the mapping and reload robot geometry, without changing human mounting offsets. Tracker mounting changes require input recalibration. Output configuration owns robot geometry, and the generic IK controller and drivers consume robot targets. See [frames and calibration](docs/STEAMVR.md#frames-and-verification).
+
 ### Shared robot interfaces
 
-Teleoperation and Home use the same hardware drivers. `/tracker_arm_retarget` reads calibrated human-palm and upper-arm TF and publishes targets in each robot arm's base frame. `/tianji_arm_controller` consumes these typed targets, measured joints, and driver lifecycle state to run local IK. It loads the robot model and palm TCP configuration without owning a cabinet connection.
+Teleoperation and Home use the same hardware drivers. `/tracker_arm_retarget` reads chest-relative anatomical palm and raw upper-arm Tracker TF and publishes targets in each robot arm's base frame. `/tianji_arm_controller` consumes these typed targets, measured joints, and driver lifecycle state to run local IK. It loads the robot model and palm TCP configuration without owning a cabinet connection.
 
 | Interface | Meaning |
 | --- | --- |
