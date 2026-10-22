@@ -1,40 +1,28 @@
 #!/usr/bin/env python3
-"""Tianji chest-frame driver for Cartesian IK and direct joint commands.
-
-Configuration supplies the initial pose, tool geometry, and payload source.
-"""
+"""Tianji hardware connection, joint commands, mode switching, and Home."""
 try:
     from tianji_output._internal.fx_robot import Marvin_Robot
-    from tianji_output._internal.fx_kine import Marvin_Kine
     from tianji_output._internal.structure_data import DCSS
     from tianji_output.fault_codes import describe_fault_codes, read_servo_fault_codes
 except ImportError:
     from ._internal.fx_robot import Marvin_Robot
-    from ._internal.fx_kine import Marvin_Kine
     from ._internal.structure_data import DCSS
     from .fault_codes import describe_fault_codes, read_servo_fault_codes
 import time
 import logging
-from pathlib import Path
-from .configuration import kinematics_path, load_arm_config
-from .tool_parameters import apply_tool_parameters, tool_transform
+from .configuration import load_arm_config
+from .tool_parameters import apply_tool_parameters
 
 
 class TianjiChestDriver:
-    """
-    Tianji dual-arm Chest-frame driver.
+    """Single dual-arm hardware connection; all joint angles are in degrees."""
 
-    Supports Cartesian-space control (via IK) and joint-space control
-    (direct angles). HTC/Tracker teleop uses the Cartesian pathway.
-    """
-
-    def __init__(self, robot_ip=None, config_path=None, logger=None, *, config=None):
+    def __init__(self, robot_ip=None, logger=None, *, config=None, on_command=None, stop_requested=None):
         """
         Initialize both arms.
 
         Args:
             robot_ip: optional override for driver.robot_ip.
-            config_path: optional kinematics model path override.
             logger: optional external logger (e.g. ROS2 node logger).
             config: complete arm configuration; otherwise load the default file.
         """
@@ -48,47 +36,14 @@ class TianjiChestDriver:
                 handler.setFormatter(logging.Formatter('[%(name)s] %(message)s'))
                 self.logger.addHandler(handler)
 
+        self._on_command = on_command
+        self._stop_requested = stop_requested
         cfg = load_arm_config() if config is None else config
         self._tool_config = cfg['driver']
         self._init_joints_left = list(cfg['left_arm']['home_joints'])
         self._init_joints_right = list(cfg['right_arm']['home_joints'])
         if robot_ip is None:
             robot_ip = cfg['driver']['robot_ip']
-        model_path = (Path(config_path).expanduser().resolve()
-                      if config_path is not None else kinematics_path(cfg))
-        config_path = str(model_path)
-        if not model_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        self.logger.debug(f"Loading config: {config_path}")
-
-        # ---------------------- Kinematics init ----------------------
-        self.logger.debug("[arm A] Initializing kinematics SDK...")
-        self.kine_left = Marvin_Kine()
-        config_result = self.kine_left.load_config(config_path=config_path)
-        time.sleep(0.3)
-        self.kine_left.initial_kine(
-            robot_serial=0,
-            robot_type=config_result['TYPE'][0],
-            dh=config_result['DH'][0],
-            pnva=config_result['PNVA'][0],
-            j67=config_result['BD'][0]
-        )
-        self.kine_left.set_tool_kine(0, tool_transform(self._tool_config, 'left'))
-
-        self.logger.debug("[arm B] Initializing kinematics SDK...")
-        self.kine_right = Marvin_Kine()
-        config_result = self.kine_right.load_config(config_path=config_path)
-        time.sleep(0.3)
-        self.kine_right.initial_kine(
-            robot_serial=1,
-            robot_type=config_result['TYPE'][1],
-            dh=config_result['DH'][1],
-            pnva=config_result['PNVA'][1],
-            j67=config_result['BD'][1]
-        )
-        self.kine_right.set_tool_kine(1, tool_transform(self._tool_config, 'right'))
-
         # ---------------------- Robot connection ----------------------
         self.logger.debug("Initializing robot control...")
         self.robot = Marvin_Robot()
@@ -106,13 +61,6 @@ class TianjiChestDriver:
 
         if not self._verify_connection():
             raise ConnectionError("Robot connection failed")
-
-        # ---------------------- IK parameters (live-tunable) ----------------------
-        self.zsp_type = 1                            # nullspace constraint type
-        self.left_zsp_para = [0, -1, -0.5, 0, 0, 0]  # left-arm nullspace plane
-        self.right_zsp_para = [0, 1, -0.5, 0, 0, 0]  # right-arm nullspace plane
-        self.zsp_angle = 0.0                         # nullspace arm-angle rotation
-        self.dgr = [5.0, 5.0, 5.0]                   # singularity tolerance (deg)
 
         # Tool dynamic parameters (Wuji Hand)
         self._set_tool_params()
@@ -303,105 +251,6 @@ class TianjiChestDriver:
         )
         return False, diag
 
-    # ==================== Cartesian-space control ====================
-
-    def move_to_pose_direct(self, left_pose=None, right_pose=None, unit='mm', send=True):
-        """
-        Cartesian-space control: IK-solve both arms and dispatch joint commands.
-        Non-blocking, suitable for realtime tracking.
-
-        Args:
-            left_pose: [X, Y, Z, RX, RY, RZ] left target pose; None to skip the arm.
-            right_pose: [X, Y, Z, RX, RY, RZ] right target pose; None to skip.
-            unit: 'mm' or 'm'.
-            send: if False, only run IK and return the solved joints without
-                pushing them to the controller. Used by the handoff ramp in
-                tianji_arm_node, which needs to blend the IK target with a
-                start snapshot before dispatching via move_to_joints_direct.
-
-        Returns:
-            tuple: (left_success, right_success, left_joints, right_joints).
-        """
-        left_mm = None
-        right_mm = None
-        if left_pose is not None:
-            left_mm = list(left_pose)
-            if unit == 'm':
-                for i in range(3):
-                    left_mm[i] *= 1000
-        if right_pose is not None:
-            right_mm = list(right_pose)
-            if unit == 'm':
-                for i in range(3):
-                    right_mm[i] *= 1000
-
-        ref_left, ref_right = self.get_current_joints()
-
-        left_success = False
-        right_success = False
-        left_joints = None
-        right_joints = None
-
-        if left_mm is not None:
-            try:
-                left_mat = self.kine_left.xyzabc_to_mat4x4(left_mm)
-                left_ik = self.kine_left.ik(
-                    robot_serial=0,
-                    pose_mat=left_mat,
-                    ref_joints=ref_left,
-                    zsp_type=self.zsp_type,
-                    zsp_para=self.left_zsp_para,
-                    zsp_angle=self.zsp_angle,
-                    dgr=self.dgr,
-                )
-                if left_ik is not False:
-                    if not left_ik.m_Output_IsOutRange and not left_ik.m_Output_IsJntExd:
-                        left_joints = left_ik.m_Output_RetJoint.to_list()
-                        left_success = True
-            except Exception as e:
-                self.logger.debug(f"left IK exception: {e}")
-
-        if right_mm is not None:
-            try:
-                right_mat = self.kine_right.xyzabc_to_mat4x4(right_mm)
-                right_ik = self.kine_right.ik(
-                    robot_serial=1,
-                    pose_mat=right_mat,
-                    ref_joints=ref_right,
-                    zsp_type=self.zsp_type,
-                    zsp_para=self.right_zsp_para,
-                    zsp_angle=self.zsp_angle,
-                    dgr=self.dgr,
-                )
-                if right_ik is not False:
-                    if not right_ik.m_Output_IsOutRange and not right_ik.m_Output_IsJntExd:
-                        right_joints = right_ik.m_Output_RetJoint.to_list()
-                        right_success = True
-            except Exception as e:
-                self.logger.debug(f"right IK exception: {e}")
-
-        if left_joints is not None:
-            left_joints_str = ', '.join([f'{j:7.2f}' for j in left_joints])
-            self.logger.debug(f"[LEFT_IK]  joints: [{left_joints_str}]")
-        else:
-            self.logger.debug("[LEFT_IK]  FAILED!")
-
-        if right_joints is not None:
-            right_joints_str = ', '.join([f'{j:7.2f}' for j in right_joints])
-            self.logger.debug(f"[RIGHT_IK] joints: [{right_joints_str}]")
-        else:
-            self.logger.debug("[RIGHT_IK] FAILED!")
-
-        if send:
-            self.robot.clear_set()
-            if left_joints is not None:
-                self.robot.set_joint_cmd_pose(arm='A', joints=left_joints)
-            if right_joints is not None:
-                self.robot.set_joint_cmd_pose(arm='B', joints=right_joints)
-            self.robot.send_cmd()
-
-        return left_success, right_success, left_joints, right_joints
-
     # ==================== Joint-space control ====================
 
     def move_to_joints_direct(self, left_joints=None, right_joints=None):
@@ -428,9 +277,10 @@ class TianjiChestDriver:
             self.robot.set_joint_cmd_pose(arm='B', joints=list(right_joints))
             right_joints_str = ', '.join([f'{j:7.2f}' for j in right_joints])
             self.logger.debug(f"[RIGHT] joints: [{right_joints_str}]")
-        self.robot.send_cmd()
-
-        return left_success, right_success
+        submitted = self.robot.send_cmd()
+        if submitted and self._on_command is not None:
+            self._on_command(left_joints, right_joints)
+        return left_success and submitted, right_success and submitted
 
     def move_to_joints_smooth(self, left_target=None, right_target=None, duration=3.0, dt=0.01):
         """
@@ -459,6 +309,8 @@ class TianjiChestDriver:
         self.logger.debug(f"Smooth move to target ({duration}s quintic blend)...")
 
         for i in range(num_points + 1):
+            if self._stop_requested is not None and self._stop_requested():
+                raise InterruptedError("Home interrupted by driver shutdown")
             t = i / num_points
             s = 10 * (t ** 3) - 15 * (t ** 4) + 6 * (t ** 5)
 
@@ -471,10 +323,7 @@ class TianjiChestDriver:
                 for j in range(7)
             ]
 
-            self.robot.clear_set()
-            self.robot.set_joint_cmd_pose(arm='A', joints=target_left)
-            self.robot.set_joint_cmd_pose(arm='B', joints=target_right)
-            self.robot.send_cmd()
+            self.move_to_joints_direct(target_left, target_right)
 
             time.sleep(dt)
 

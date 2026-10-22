@@ -105,7 +105,9 @@ Bringup sets `auto_enable: true` for selected hand drivers. The canonical profil
 | `openvr.publish_rate_hz`, `publish_tf`, `parent_frame` | Tracker publication rate, TF switch, and world frame |
 | `openvr.calibration_file` | Tracker calibration filename or absolute path; supplied value `tracker.yaml` |
 
-The supplied arm Home is left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Normal startup enters position mode, moves Home, then enters joint-impedance mode. The launch preparation interval is fixed at three seconds. Disable requests standby while keeping the connection. Enable and disable use the controller's enable lock; a disable request waits for an initialization already holding that lock.
+The supplied arm Home is left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Normal startup enters position mode, moves Home, then enters joint-impedance mode. The launch preparation interval is fixed at three seconds. Disable requests standby while keeping the connection. The shared `/tianji_arm/driver` owns the connection and serializes SDK operations; an enable or disable request waits for an operation already running. `/tianji_arm_controller` runs pure local IK from TF and measured joint feedback.
+
+Arm ROS joint commands and feedback use radians, velocities use rad/s, and measured torques use Nm. Degree conversion happens at the hardware and local-IK boundaries; the Home YAML remains in degrees and existing Tracker calibration retains its meaning. The monitor displays arm values in degrees. See [shared robot interfaces](../README.md#shared-robot-interfaces) for topics and services.
 
 ### Tool geometry and payload
 

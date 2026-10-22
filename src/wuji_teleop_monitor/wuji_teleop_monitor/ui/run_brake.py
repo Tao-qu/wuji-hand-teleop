@@ -8,7 +8,7 @@ when teleop is OFF and you need to manually release / hold the brakes,
 clear servo errors, or read state codes.
 
 Marvin allows a single TCP session at a time — if teleop's
-`tianji_arm_controller` is running it already owns the connection, so
+`/tianji_arm/driver` is running it already owns the connection, so
 this UI's Connect will fail with "port in use". Stop teleop first.
 
 Usage:

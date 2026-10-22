@@ -7,10 +7,10 @@ from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.signals import SignalHandlerOptions
-from sensor_msgs.msg import JointState
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
-from controller.common import ROS2LoggerAdapter, get_default_qos, load_yaml_config
+from controller.common import load_yaml_config
 from .launch_utils import resolve_config_path
 
 
@@ -25,7 +25,8 @@ class HomePositionNode(Node):
             raise ValueError("mode must be both, arms, or hands")
         self._use_arms = mode in ("both", "arms")
         self._hands = {}
-        self._arm_controller = None
+        self._arm_home_client = None
+        self._arm_finished = threading.Event()
         self._state_lock = threading.Lock()
         self._arm_done = not self._use_arms
         self._hands_sent = mode == "arms"
@@ -48,16 +49,8 @@ class HomePositionNode(Node):
                 hand = WujiHand2(config.get("name", f"{side}_hand"), side, self)
                 self._hands[side] = (hand, config["home_joints"])
 
-        self._arm_state_pubs = {}
         if self._use_arms:
-            from tianji_output.configuration import load_arm_config
-
-            self._arm_config = load_arm_config()
-            state_rate = float(self._arm_config["controller"]["state_publish_rate"])
-            for side in ("left", "right"):
-                self._arm_state_pubs[side] = self.create_publisher(
-                    JointState, f"/{side}_arm/joint_states", get_default_qos())
-            self._timers.append(self.create_timer(1.0 / state_rate, self._publish_arm_feedback))
+            self._arm_home_client = self.create_client(Trigger, "/tianji_arm/home")
 
         self._timers.append(self.create_timer(1.0 / command_rate, self._publish_targets))
         self._timers.append(self.create_timer(0.2, self._publish_status))
@@ -71,23 +64,29 @@ class HomePositionNode(Node):
             self.get_logger().error(message)
 
     def _home_arms(self):
-        try:
-            from tianji_output import TianjiChestDriver
+        """Request the driver's existing Home motion and wait for its result."""
+        while rclpy.ok() and not self._arm_home_client.wait_for_service(timeout_sec=0.2):
+            pass
+        if not rclpy.ok():
+            return
+        future = self._arm_home_client.call_async(Trigger.Request())
+        future.add_done_callback(self._on_arm_home_response)
+        while rclpy.ok() and not self._arm_finished.wait(timeout=0.2):
+            pass
 
-            self._arm_controller = TianjiChestDriver(
-                config=self._arm_config,
-                logger=ROS2LoggerAdapter(self.get_logger()))
-            self._arm_controller.set_position_mode(velRatio=100, AccRatio=100)
-            result = self._arm_controller.move_to_init(
-                wait=False,
-                duration=float(self._arm_config["controller"]["home_duration_sec"]))
-            if result is False:
-                self._set_error("Arm Home operation reported failure")
-                return
-            with self._state_lock:
-                self._arm_done = True
+    def _on_arm_home_response(self, future):
+        """The response belongs to this request and reports completed motion."""
+        try:
+            response = future.result()
+            if response.success:
+                with self._state_lock:
+                    self._arm_done = True
+            else:
+                self._set_error(f"Arm Home failed: {response.message}")
         except Exception as exc:
-            self._set_error(f"Arm Home failed: {exc}")
+            self._set_error(f"Arm Home request failed: {exc}")
+        finally:
+            self._arm_finished.set()
 
     def _publish_targets(self):
         if self._hands:
@@ -96,27 +95,6 @@ class HomePositionNode(Node):
                 self._hands_sent = all(results)
             if not all(results):
                 self._set_error("Could not publish the configured hand Home targets")
-
-    def _arm_message(self, side, positions):
-        message = JointState()
-        message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = f"{side}_base_state"
-        message.name = [f"{side}_joint_{index + 1}" for index in range(7)]
-        # Match the existing Tianji ROS interface, which uses degrees.
-        message.position = [float(value) for value in positions]
-        return message
-
-    def _publish_arm_feedback(self):
-        controller = self._arm_controller
-        if controller is None:
-            return
-        try:
-            left, right = controller.get_current_joints()
-            for side, positions in (("left", left), ("right", right)):
-                if positions is not None:
-                    self._arm_state_pubs[side].publish(self._arm_message(side, positions))
-        except Exception as exc:
-            self._set_error(f"Arm feedback failed: {exc}")
 
     def _publish_status(self):
         with self._state_lock:
@@ -129,16 +107,12 @@ class HomePositionNode(Node):
     def close(self):
         for timer in self._timers:
             timer.cancel()
-        try:
-            if self._arm_controller is not None:
-                self._arm_controller.disable_and_release()
-        finally:
-            for hand, _target in self._hands.values():
-                hand.release()
+        for hand, _target in self._hands.values():
+            hand.release()
 
 
 def main(args=None):
-    # Keep Python's SIGINT handler so it interrupts the existing arm move.
+    # Keep Python's SIGINT handler while waiting for the driver's Home result.
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = None
     executor = None

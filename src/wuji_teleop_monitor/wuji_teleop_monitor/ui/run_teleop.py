@@ -47,8 +47,8 @@ try:
 except ImportError:
     _HAS_ROS2 = False
 
-# Lifecycle states published by tianji_arm_controller on
-# /tianji_arm/lifecycle_state. Keep in sync with controller/tianji_arm_node.py.
+# Lifecycle states published by /tianji_arm/driver on
+# /tianji_arm/lifecycle_state. Keep in sync with tianji_output/driver_node.py.
 _LC_INITIALIZING = 0
 _LC_ENABLING = 1
 _LC_READY = 2
@@ -124,9 +124,9 @@ class TeleopLauncherUI(QMainWindow):
         self._pending_output = deque()
         self._stop_in_progress = False
 
-        # Last lifecycle state we heard from tianji_arm_controller. None
-        # means "no message yet" (the controller's TRANSIENT_LOCAL latch
-        # hasn't reached us, or this preset doesn't have an arm controller).
+        # Last lifecycle state we heard from /tianji_arm/driver. None
+        # means "no message yet" (the driver's TRANSIENT_LOCAL latch
+        # hasn't reached us, or this preset doesn't have an arm driver).
         self._arm_lifecycle = None
         self._home_state = ""
         self._hand_seen = {}
@@ -174,11 +174,6 @@ class TeleopLauncherUI(QMainWindow):
                     match_publisher_qos(self._ros_node, hand_topic))
 
                 # Count commands from the active control chains.
-                arm_cmd_topic = f'/{side}_arm/joint_commands'
-                self._ros_node.create_subscription(
-                    JointState, arm_cmd_topic,
-                    lambda msg, s=side: self._joint_panel.record_hz(f'{s}_arm'),
-                    match_publisher_qos(self._ros_node, arm_cmd_topic))
                 hand_cmd_topic = f'/{side}_hand/joint_commands'
                 self._ros_node.create_subscription(
                     JointState, hand_cmd_topic,
@@ -195,9 +190,14 @@ class TeleopLauncherUI(QMainWindow):
                 self._enable_clients[side] = self._ros_node.create_client(
                     SetBool, f'/{side}_hand/set_enabled')
 
-            # Latched lifecycle state from tianji_arm_controller. RELIABLE
+            arm_cmd_topic = '/tianji_arm/commanded_joint_states'
+            self._ros_node.create_subscription(
+                JointState, arm_cmd_topic, self._on_arm_command,
+                match_publisher_qos(self._ros_node, arm_cmd_topic))
+
+            # Latched lifecycle state from /tianji_arm/driver. RELIABLE
             # + TRANSIENT_LOCAL matches the publisher so we receive the
-            # last value even when subscribing before the controller comes
+            # last value even when subscribing before the driver comes
             # up. See _LC_* constants for the state machine.
             _lc_qos = QoSProfile(
                 reliability=QoSReliabilityPolicy.RELIABLE,
@@ -212,7 +212,7 @@ class TeleopLauncherUI(QMainWindow):
                 String, '/wuji_home/state',
                 lambda msg: self._home_state_signal.emit(msg.data), _lc_qos)
             self._enable_clients['arms'] = self._ros_node.create_client(
-                SetBool, '/tianji_arm_controller/set_enabled')
+                SetBool, '/tianji_arm/set_enabled')
 
         # Uptime / liveness timers.
         self._uptime_timer = QTimer(self)
@@ -447,8 +447,14 @@ class TeleopLauncherUI(QMainWindow):
     # -------------------- ROS2 callbacks --------------------
 
     def _on_joint_state(self, side: str, msg):
-        positions = list(msg.position[:7]) if len(msg.position) >= 7 else list(msg.position)
+        values = dict(zip(msg.name, msg.position))
+        positions = [math.degrees(values[f'{side}_joint_{index + 1}']) for index in range(7)]
         self._joint_panel.update_joints(side, positions)
+
+    def _on_arm_command(self, msg):
+        for side in ('left', 'right'):
+            if f'{side}_joint_1' in msg.name:
+                self._joint_panel.record_hz(f'{side}_arm')
 
     def _on_hand_state(self, side, msg):
         now = time.monotonic()

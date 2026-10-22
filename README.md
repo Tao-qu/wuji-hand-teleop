@@ -85,7 +85,7 @@ Individual enable/disable services are also available:
 ```bash
 ros2 service call /left_hand/set_enabled std_srvs/srv/SetBool '{data: true}'
 ros2 service call /right_hand/set_enabled std_srvs/srv/SetBool '{data: true}'
-ros2 service call /tianji_arm_controller/set_enabled std_srvs/srv/SetBool '{data: false}'
+ros2 service call /tianji_arm/set_enabled std_srvs/srv/SetBool '{data: false}'
 ```
 
 Hand service responses acknowledge queued SDK operations. Check lifecycle and diagnostics for their results. The monitor expects the `/left_hand` and `/right_hand` namespaces.
@@ -102,11 +102,11 @@ ros2 run wuji_teleop_bringup wuji_teleop.launch.py --home --disable-arm
 
 Hand Home uses 20 joint positions in radians from each hand's `home_joints`, in thumb, index, middle, ring, pinky order, four joints each. Arm Home uses seven joint positions per arm in degrees and `controller.home_duration_sec`. The supplied duration is 8 seconds; hands-only Home publishes targets for 8 seconds. Initialization and shutdown add time outside the motion interval. The session exits and closes the selected devices when the operation ends.
 
-The monitor shows feedback and `/wuji_home/state`. `ACTIVE` means hand targets have been published and the selected arm Home call has completed; it does not measure hand arrival. Arm Home commands go directly through the SDK, so the ROS **Cmd Hz** column does not measure that trajectory's rate.
+The monitor shows feedback and `/wuji_home/state`. `ACTIVE` means hand targets have been published and the selected arm Home call has completed; it does not measure hand arrival. Home calls the shared arm driver's `/tianji_arm/home` service, whose response reports the completed operation. `/tianji_arm/home_state` provides its display status. Submitted arm commands, including Home interpolation, appear on `/tianji_arm/commanded_joint_states`.
 
 ### Arm brake tool
 
-Stop the arm controller before opening the separate brake tool, which connects directly to the cabinet:
+Stop the arm session before opening the separate brake tool, which connects directly to the cabinet:
 
 ```bash
 ros2 run wuji_teleop_monitor brake
@@ -132,7 +132,9 @@ MANUS → manus_ros2 → 21 keypoints per hand
       → official RetargetSession(WujiHand2)
       → /{side}_hand/joint_commands → wujihand2_driver → SDK → hand
 
-5 Trackers → OpenVR → TF → tianji_arm_controller → Tianji IK/SDK → arms
+5 Trackers → OpenVR → TF → tianji_arm_controller (local IK)
+      → /tianji_arm/joint_commands → /tianji_arm/driver → SDK → arms
+      ← /{side}_arm/joint_states ← /tianji_arm/driver
 ```
 
 Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark order and outputs 20 positions in radians in firmware order. `controller.flip_y: false` preserves the publisher's right-handed coordinates. Each hand has one persistent SDK retargeting session. MANUS and hand controllers run at 120 Hz by default; the enabled hand bridge sends its latest target at 200 Hz. See the [MANUS input contract](src/input_devices/manus_input/README.md#input-contract) and [hand ROS interfaces](src/output_devices/wujihand2_output/README.md).
@@ -141,13 +143,34 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 | --- | --- |
 | `src/input_devices/manus_input/` | MANUS publisher, messages, and calibration |
 | `src/input_devices/openvr_input/` | Five-Tracker acquisition, calibration, and TF |
-| `src/controller/` | Hand input loops and arm lifecycle |
+| `src/controller/` | Hand and Tracker retargeting to robot joint targets |
 | `src/output_devices/wujihand2_output/wujihand2_ros2/` | Hand SDK adapter, retargeting, and configuration |
 | `src/output_devices/wujihand2_output/wuji-description/hand2/hand2_2/body/` | Pinned official Hand 2.2 model |
-| `src/output_devices/tianji_output/` | Tianji driver, kinematics, and tool parameters |
+| `src/output_devices/tianji_output/` | Shared Tianji ROS driver, pure kinematics, and tool parameters |
 | `src/wuji_teleop_bringup/` | Teleoperation, Home, Preview, and static transforms |
 | `src/wuji_teleop_monitor/` | Qt monitor and brake tool |
 | `tools/` | Setup, environment, configuration, and dependency tools |
+
+### Shared robot interfaces
+
+Teleoperation and Home use the same hardware drivers. Local kinematics loads the existing model and TCP configuration without connecting to the cabinet. The arm retargeting node receives measured joints as its IK reference; it never owns a robot connection.
+
+| Interface | Meaning |
+| --- | --- |
+| `/{side}_hand/joint_commands` | Twenty named hand target positions, radians |
+| `/tianji_arm/joint_commands` | One named joint command for both arms (normally 14 positions), radians |
+| `/{side}_hand/joint_states` | Measured hand position and velocity, radians and rad/s |
+| `/{side}_arm/joint_states` | Measured arm position, velocity, and torque, radians, rad/s, and Nm |
+| `/{side}_hand/commanded_joint_states` | Hand target submitted successfully to the SDK |
+| `/tianji_arm/commanded_joint_states` | Arm targets submitted together to the SDK, including Home |
+| `/tianji_arm/lifecycle_state` | Shared arm readiness and operation state |
+| `/tianji_arm/home_state` | Driver Home request status: MOVING, ACTIVE, or ERROR |
+
+The joint topics use `sensor_msgs/msg/JointState`. Arm command names are `left_joint_1` through `left_joint_7`, followed by `right_joint_1` through `right_joint_7`. One complete seven-joint side is also accepted when only that side has an IK result; the driver submits the included sides in one SDK call. Hand names follow the official model's `l_`/`r_` names in [firmware order](src/output_devices/wujihand2_output/README.md#topics-and-services).
+
+All joint ROS interfaces use radians; arm Home configuration and the native Tianji SDK use degrees. The monitor converts arm feedback to degrees for display. Submission timestamps identify SDK submission, not physical arrival. Hand feedback is stamped in the SDK receive callback; arm feedback is stamped when reading the SDK cache, which may repeat a hardware sample. `/left_arm/ee_pose` and `/right_arm/ee_pose` remain Tracker target TCP arrays in metres/degrees, not measured end-effector poses.
+
+The arm driver provides `/tianji_arm/set_enabled`, `/tianji_arm/set_arm_state`, and `/tianji_arm/{left,right}/{brake,clear_error}` (`SetBool`), plus `/tianji_arm/home` and `/tianji_arm/arm_status` (`Trigger`). An external command source can reuse these hardware interfaces without starting MANUS, OpenVR, or retargeting. Each session selects a single command source.
 
 ## Environment checks and documentation
 

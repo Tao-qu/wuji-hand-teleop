@@ -3,7 +3,7 @@
 <package format="3">
   <name>controller</name>
   <version>0.1.0</version>
-  <description>Tianji Arm + Wuji Hand ROS2 controller nodes (single-machine TELEOP).</description>
+  <description>Tracker and MANUS retargeting nodes for Tianji arms and Wuji Hand 2.</description>
   <maintainer email="dev@wuji.com">Wuji Robotics</maintainer>
   <license>MIT</license>
 
@@ -16,7 +16,7 @@
   <depend>geometry_msgs</depend>
   <depend>manus_ros2_msgs</depend>
 
-  <!-- Hardware-interface dependencies -->
+  <!-- Kinematics and hand retargeting dependencies -->
   <exec_depend>tianji_output</exec_depend>
   <exec_depend>wujihand2_ros2</exec_depend>
 

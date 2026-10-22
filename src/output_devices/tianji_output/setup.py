@@ -28,9 +28,10 @@ setup(
         'numpy>=1.24.0',
         'PyYAML',
     ],
+    entry_points={'console_scripts': ['tianji_driver = tianji_output.driver_node:main']},
     zip_safe=False,  # Must be False because of shared libraries
     maintainer='wuji',
     maintainer_email='your_email@example.com',
-    description='Tianji arm hardware interface library with a chest-frame driver',
+    description='Tianji dual-arm ROS driver and local kinematics',
     license='MIT',
 )

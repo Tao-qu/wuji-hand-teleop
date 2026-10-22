@@ -56,6 +56,16 @@ def _nodes(context):
                     parameters=[dict(config.get("controller", {}),
                                      wait_for_arm=arm, startup_wait_sec=3.0)],
                     arguments=["--side", side, "--hand-name", name]))
+    if arm:
+        arm_path = arm_config_path()
+        arm_driver = Node(
+            package="tianji_output", executable="tianji_driver", output="screen",
+            arguments=["-c", str(arm_path)],
+            parameters=[{"auto_enable": not options.home}])
+        nodes.append(RegisterEventHandler(OnProcessExit(
+            target_action=arm_driver,
+            on_exit=[EmitEvent(event=Shutdown(reason="Arm driver exited"))])))
+        nodes.append(arm_driver)
     if options.home:
         mode = "both" if hand and arm else "hands" if hand else "arms"
         home = Node(
@@ -73,8 +83,7 @@ def _nodes(context):
         nodes.extend(create_tcp_target_tf_nodes(calibration))
         nodes.append(Node(
             package="controller", executable="tianji_arm_controller", output="screen",
-            arguments=["-c", str(arm_path)],
-            parameters=[{"auto_enable": True, "startup_wait_sec": 3.0}]))
+            arguments=["-c", str(arm_path)]))
     return nodes
 
 
