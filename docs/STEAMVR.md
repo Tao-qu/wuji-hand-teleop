@@ -4,7 +4,7 @@
 
 Install Steam and SteamVR in the local graphical session using the same operating-system account as teleoperation. Prepare five compatible Vive Trackers, their USB receivers, and Lighthouse base stations covering the workspace. Pair each Tracker in SteamVR and confirm valid tracking before starting the ROS input node.
 
-Mount one Tracker on the chest, one on the back of each hand, and one on the outside of each upper arm. Both upper-arm Trackers are required for the arm redundancy calculation. See the [wearing guide](tracker-wearing-guide.md).
+Mount one Tracker facing forward on the chest, one on the back of each MANUS glove, and one facing outward on each upper arm. Both upper-arm Trackers are required for the arm redundancy calculation, which uses their orientation rather than position. See the [wearing guide](tracker-wearing-guide.md).
 
 ## Headset-free configuration
 
@@ -57,7 +57,9 @@ The supplied configuration contains the supplied installation's serials. Assign 
 
 ## Neutral-pose calibration
 
-Configure arm Home, Tracker serials, and `driver.tool_transforms` before calibration. Keep SteamVR running and stop other OpenVR input processes. The tool reads the default local arm configuration, Tracker poses, and local kinematics; it does not connect to the cabinet.
+Configure arm Home, Tracker serials, and `driver.tool_transforms` before calibration. The robot TCP is the palm: both supplied flange-to-palm transforms have identity rotation and `[0, 0, 70]` mm translation. In the selected Tracker profile, set `hand_back_to_palm.left/right.tracker_offset_m` to the measured palm-to-Tracker displacement in aligned human palm axes. The supplied values are `[0, -0.05, 0]` m on the left and `[0, 0.05, 0]` m on the right. A static Home capture does not measure those mounting distances.
+
+Keep SteamVR running and stop other OpenVR input processes. The tool reads the default local arm configuration, selected profile, Tracker poses, and local kinematics; it does not connect to the cabinet.
 
 ```bash
 source tools/env.sh
@@ -71,15 +73,17 @@ Inspection is the default mode. It displays the configured Home and each Tracker
 2. Press Enter when ready. After the three-second countdown, hold still with all five Trackers visible for the five-second capture.
 3. Review the displayed fit errors and valid frame count, then enter `save`, `retry`, or `cancel`.
 
+The fit first aligns hand orientations, then subtracts the configured Tracker offsets to obtain human palm positions. It fits the chest/Home reference against the robot palm poses computed by forward kinematics at Home and calibrates upper-arm orientation.
+
 Saving writes `src/input_devices/openvr_input/calibration/tracker.yaml` in a symlink build. The directory is fixed by the package; a regular install uses its package-share calibration directory. A successful save replaces the existing profile after writing it completely. Cancellation leaves the existing file unchanged.
 
 `--output FILENAME` optionally selects another filename in the same directory; paths are not accepted. If used, set `openvr.calibration_file` to that filename. The configured value may be a package calibration filename or an absolute path. For the normal canonical workflow, no selection change is needed after saving `tracker.yaml`.
 
-Restart input and teleoperation processes after saving. No rebuild is required with the symlink setup. Recalibrate after changing Tracker mounting, flange-to-TCP geometry, or arm Home.
+Restart input and teleoperation processes after saving. No rebuild is required with the symlink setup. Measure and update the profile offsets when the glove mounting changes, then recalibrate. Recalibrate after other Tracker mounting changes, flange-to-palm geometry changes, or arm Home changes.
 
 ## Frames and verification
 
-The raw `left_hand_back` and `right_hand_back` origins supply target position directly. The profile's `hand_back_to_tcp` quaternions align orientation with `left_tcp_target` and `right_tcp_target`, using zero translation. The robot's flange-to-virtual-hand-back-TCP geometry belongs in `driver.tool_transforms.left/right`, in millimetres. Its axes are parallel to the flange axes, and local Tianji IK applies it once. The profile also holds chest transforms and upper-arm orientation corrections. See the [configuration reference](LOCAL_SETUP.md#tracker-calibration).
+The profile's `hand_back_to_palm` quaternions define the rotation `R` from each `{side}_hand_back` frame to its `{side}_human_palm` child. The child translation is `-R @ tracker_offset_m`, so the target follows the estimated human palm rather than the raw Tracker origin. The offset is expressed in the aligned human palm axes. The separate robot flange-to-palm geometry belongs in `driver.tool_transforms.left/right`, in millimetres, and local Tianji IK applies it once. The robot TCP is not a fingertip frame. The profile also holds chest transforms and upper-arm orientation corrections. See the [configuration reference](LOCAL_SETUP.md#tracker-calibration).
 
 Start input alone, then inspect TF from another terminal with the same environment:
 
@@ -107,4 +111,15 @@ For arm teleoperation:
 ros2 run wuji_teleop_bringup wuji_teleop.launch.py --disable-hand
 ```
 
-This command automatically enables both arms, moves Home, and prepares for three seconds before following Tracker targets. The controller uses the TCP targets relative to each chest frame and the upper-arm reference directions to solve IK. Check mounting, coordinate axes, Home, and emergency-stop access before starting motion.
+This command automatically enables both arms, moves Home, and prepares for three seconds before following Tracker targets. `/tracker_arm_retarget` reads the calibrated palm poses relative to each chest reference and publishes `/{side}_arm/tcp_target` (`PoseStamped`, metres and an `x, y, z, w` quaternion) and `/{side}_arm/upper_arm_reference` (`Vector3Stamped`, unit direction), both in `{side}_base`. `/tianji_arm_controller` uses those targets and measured joint feedback to solve IK. A policy can supply the same messages without OpenVR; use one command source at a time. The existing `/left_arm/ee_pose` and `/right_arm/ee_pose` arrays remain target TCP values in metres/degrees for compatibility, not measured state. Check mounting, coordinate axes, Home, and emergency-stop access before starting motion.
+
+While arm teleoperation is running, use another terminal to read the target messages or inspect the palm transform:
+
+```bash
+source tools/env.sh
+ros2 topic echo /left_arm/tcp_target --once
+ros2 topic echo /left_arm/upper_arm_reference --once
+ros2 run tf2_ros tf2_echo left_hand_back left_human_palm
+```
+
+The palm transform is provided by teleoperation bringup; the standalone OpenVR reader publishes the five body-mounted Tracker frames.

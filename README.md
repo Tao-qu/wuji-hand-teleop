@@ -46,11 +46,13 @@ Teleoperation uses one hand configuration, one arm configuration, and three cali
 | `src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml` | Cabinet address, arm Home and control settings, tool geometry and dynamics, five Tracker serials |
 | `src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal` | Left MANUS calibration |
 | `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal` | Right MANUS calibration |
-| `src/input_devices/openvr_input/calibration/tracker.yaml` | Chest transforms, hand-back orientation alignment, and upper-arm mounting rotations |
+| `src/input_devices/openvr_input/calibration/tracker.yaml` | Chest transforms, hand-back-to-palm alignment and measured offsets, and upper-arm mounting rotations |
 
 All five runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py --profile teleop` copies only missing files and preserves existing configuration and calibration. Add `--check` to check that these five files exist without writing. The camera profile initializes its own configuration and four intrinsic-calibration files; `configure.py` without a profile processes both sets.
 
 Templates describe the supplied installation; the `.mcal.template` files are complete binary profiles, not editable text. Check serial numbers, cabinet IP, mounting dimensions, and operator calibration for your hardware before operation. Edit the source configuration files and use the calibration tools to update profiles; the symlink build makes them available to ROS.
+
+The arm TCP is the robot palm, with identity flange-to-palm rotation and `[0, 0, 70]` mm translation on both sides. It is not a fingertip frame. The glove-mounted hand-back Trackers have separate offsets from the human palms: `hand_back_to_palm.left/right.tracker_offset_m` records palm-to-Tracker displacement in aligned human palm axes, supplied as `[0, -0.05, 0]` m on the left and `[0, 0.05, 0]` m on the right. Measure these offsets for the wearer and mounting, then [calibrate against arm Home](docs/STEAMVR.md#neutral-pose-calibration).
 
 `manus.left_calibration_file` and `manus.right_calibration_file` select the MANUS profiles by filename. `openvr.calibration_file: tracker.yaml` selects the Tracker profile. Calibration filenames resolve in their respective package calibration directories; absolute paths are also supported. Teleoperation and Preview read the same MANUS settings. See [configuration fields and units](docs/LOCAL_SETUP.md#configuration-reference), [MANUS calibration](src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md), and [Tracker calibration](docs/STEAMVR.md#neutral-pose-calibration).
 
@@ -134,7 +136,9 @@ MANUS → manus_ros2 → 21 keypoints per hand
       → official RetargetSession(WujiHand2)
       → /{side}_hand/joint_commands → wujihand2_driver → SDK → hand
 
-5 Trackers → OpenVR → TF → tianji_arm_controller (local IK)
+5 Trackers → OpenVR → TF → tracker_arm_retarget
+      → /{side}_arm/tcp_target + /{side}_arm/upper_arm_reference
+      → tianji_arm_controller (local IK)
       → /tianji_arm/joint_commands → /tianji_arm/driver → SDK → arms
       ← /{side}_arm/joint_states ← /tianji_arm/driver
 ```
@@ -145,7 +149,7 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 | --- | --- |
 | `src/input_devices/manus_input/` | MANUS publisher, messages, and calibration |
 | `src/input_devices/openvr_input/` | Five-Tracker acquisition, calibration, and TF |
-| `src/controller/` | Hand and Tracker retargeting to robot joint targets |
+| `src/controller/` | Hand retargeting, Tracker-to-palm arm targets, and arm IK |
 | `src/output_devices/wujihand2_output/wujihand2_ros2/` | Hand SDK adapter, retargeting, and configuration |
 | `src/output_devices/wujihand2_output/wuji-description/hand2/hand2_2/body/` | Pinned official Hand 2.2 model |
 | `src/output_devices/tianji_output/` | Shared Tianji ROS driver, pure kinematics, and tool parameters |
@@ -157,11 +161,13 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 
 ### Shared robot interfaces
 
-Teleoperation and Home use the same hardware drivers. Local kinematics loads the existing model and TCP configuration without connecting to the cabinet. The arm retargeting node receives measured joints as its IK reference; it never owns a robot connection.
+Teleoperation and Home use the same hardware drivers. `/tracker_arm_retarget` reads calibrated human-palm and upper-arm TF and publishes targets in each robot arm's base frame. `/tianji_arm_controller` consumes these typed targets, measured joints, and driver lifecycle state to run local IK. It loads the robot model and palm TCP configuration without owning a cabinet connection.
 
 | Interface | Meaning |
 | --- | --- |
 | `/{side}_hand/joint_commands` | Twenty named hand target positions, radians |
+| `/{side}_arm/tcp_target` | `geometry_msgs/msg/PoseStamped`: robot palm target in `{side}_base`, position in metres, quaternion in `x, y, z, w` order |
+| `/{side}_arm/upper_arm_reference` | `geometry_msgs/msg/Vector3Stamped`: unit upper-arm reference direction in the same `{side}_base` frame |
 | `/tianji_arm/joint_commands` | One named joint command for both arms (normally 14 positions), radians |
 | `/{side}_hand/joint_states` | Measured hand position and velocity, radians and rad/s |
 | `/{side}_arm/joint_states` | Measured arm position, velocity, and torque, radians, rad/s, and Nm |
@@ -170,11 +176,11 @@ Teleoperation and Home use the same hardware drivers. Local kinematics loads the
 | `/tianji_arm/lifecycle_state` | Shared arm readiness and operation state |
 | `/tianji_arm/home_state` | Driver Home request status: MOVING, ACTIVE, or ERROR |
 
-The joint topics use `sensor_msgs/msg/JointState`. Arm command names are `left_joint_1` through `left_joint_7`, followed by `right_joint_1` through `right_joint_7`. One complete seven-joint side is also accepted when only that side has an IK result; the driver submits the included sides in one SDK call. Hand names follow the official model's `l_`/`r_` names in [firmware order](src/output_devices/wujihand2_output/README.md#topics-and-services).
+The joint topics use `sensor_msgs/msg/JointState`. Arm command names are `left_joint_1` through `left_joint_7`, followed by `right_joint_1` through `right_joint_7`. One complete seven-joint side is also accepted when only that side has an IK result; the driver submits the included sides in one SDK call. Hand names follow the official model's `l_`/`r_` names in [firmware order](src/output_devices/wujihand2_output/README.md#topics-and-services). The upper-arm reference uses Tracker orientation only; its measured position is unused.
 
-All joint ROS interfaces use radians; arm Home configuration and the native Tianji SDK use degrees. The monitor converts arm feedback to degrees for display. Submission timestamps identify SDK submission, not physical arrival. Hand feedback is stamped in the SDK receive callback; arm feedback is stamped when reading the SDK cache, which may repeat a hardware sample. `/left_arm/ee_pose` and `/right_arm/ee_pose` remain Tracker target TCP arrays in metres/degrees, not measured end-effector poses.
+All joint ROS interfaces use radians; arm Home configuration and the native Tianji SDK use degrees. The monitor converts arm feedback to degrees for display. Submission timestamps identify SDK submission, not physical arrival. Hand feedback is stamped in the SDK receive callback; arm feedback is stamped when reading the SDK cache, which may repeat a hardware sample. `/left_arm/ee_pose` and `/right_arm/ee_pose` remain compatibility arrays for target palm TCP poses in metres/degrees, not measured end-effector poses.
 
-The arm driver provides `/tianji_arm/set_enabled`, `/tianji_arm/set_arm_state`, and `/tianji_arm/{left,right}/{brake,clear_error}` (`SetBool`), plus `/tianji_arm/home` and `/tianji_arm/arm_status` (`Trigger`). An external command source can reuse these hardware interfaces without starting MANUS, OpenVR, or retargeting. Each session selects a single command source.
+The arm driver provides `/tianji_arm/set_enabled`, `/tianji_arm/set_arm_state`, and `/tianji_arm/{left,right}/{brake,clear_error}` (`SetBool`), plus `/tianji_arm/home` and `/tianji_arm/arm_status` (`Trigger`). A policy or another target source can publish the same `tcp_target` and `upper_arm_reference` messages to the generic IK controller without OpenVR or Tracker retargeting. A joint-level command source can instead reuse the hardware command interface. Use one command source at a time; the driver connection, Home, enable/disable, and feedback interfaces are shared across sources.
 
 ## Jetson cameras
 

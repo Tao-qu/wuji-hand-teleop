@@ -99,7 +99,7 @@ Bringup sets `auto_enable: true` for selected hand drivers. The canonical profil
 | `left_arm.home_joints`, `right_arm.home_joints` | Seven joint positions per arm in degrees |
 | `driver.robot_ip` | Cabinet SDK endpoint |
 | `driver.kinematics_model` | Filename in the Tianji package `config` directory, or an absolute path |
-| `driver.tool_transforms.left`, `.right` | Flange-to-TCP 4×4 transforms, translation in millimetres |
+| `driver.tool_transforms.left`, `.right` | Flange-to-robot-palm TCP 4×4 transforms, translation in millimetres |
 | `driver.tool_dynamics` | Payload source and per-arm mass, COM, and inertia |
 | `controller.control_rate` | Arm command rate in Hz; supplied value 120 |
 | `controller.state_publish_rate` | Feedback publication rate in Hz; supplied value 500 |
@@ -109,13 +109,15 @@ Bringup sets `auto_enable: true` for selected hand drivers. The canonical profil
 | `openvr.publish_rate_hz`, `publish_tf`, `parent_frame` | Tracker publication rate, TF switch, and world frame |
 | `openvr.calibration_file` | Tracker calibration filename or absolute path; supplied value `tracker.yaml` |
 
-The supplied arm Home is left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Normal startup enters position mode, moves Home, then enters joint-impedance mode. The launch preparation interval is fixed at three seconds. Disable requests standby while keeping the connection. The shared `/tianji_arm/driver` owns the connection and serializes SDK operations; an enable or disable request waits for an operation already running. `/tianji_arm_controller` runs pure local IK from TF and measured joint feedback.
+The supplied arm Home is left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Normal startup enters position mode, moves Home, then enters joint-impedance mode. The launch preparation interval is fixed at three seconds. Disable requests standby while keeping the connection. The shared `/tianji_arm/driver` owns the connection and serializes SDK operations; an enable or disable request waits for an operation already running. `/tracker_arm_retarget` reads TF and publishes palm targets and upper-arm directions. `/tianji_arm_controller` runs pure local IK from those typed messages, measured joint feedback, and driver lifecycle state.
 
-Arm ROS joint commands and feedback use radians, velocities use rad/s, and measured torques use Nm. Degree conversion happens at the hardware and local-IK boundaries; the Home YAML remains in degrees and existing Tracker calibration retains its meaning. The monitor displays arm values in degrees. See [shared robot interfaces](../README.md#shared-robot-interfaces) for topics and services.
+Arm ROS joint commands and feedback use radians, velocities use rad/s, and measured torques use Nm. Degree conversion happens at the hardware and local-IK boundaries; the Home YAML remains in degrees. The monitor displays arm values in degrees. `/{side}_arm/tcp_target` is a `PoseStamped` in `{side}_base` with metres and an `x, y, z, w` quaternion. `/{side}_arm/upper_arm_reference` is a `Vector3Stamped` unit direction in that same base frame. A policy can publish this pair without OpenVR; use one command source at a time. See [shared robot interfaces](../README.md#shared-robot-interfaces) for topics and services.
 
 ### Tool geometry and payload
 
-The virtual hand-back TCP axes are parallel to the flange axes. The supplied transforms have identity rotation and translations `[0, -50, 70]` mm on the left and `[0, 50, 70]` mm on the right. This mounting places flange +Z toward the fingers, with the hand back facing flange −Y on the left and +Y on the right. Measure the installation, including its adapter, and update these values when needed. Local Tianji IK applies this transform once.
+The robot TCP is the palm, with axes parallel to the flange axes. Both supplied flange-to-palm transforms have identity rotation and translation `[0, 0, 70]` mm. This mounting places flange +Z toward the fingers, with the hand back facing flange −Y on the left and +Y on the right. The TCP is not a fingertip. Measure the robot installation, including its adapter, and update these values when needed. Local Tianji IK applies this transform once.
+
+The left/right 50 mm displacement describes the human glove-mounted hand-back Tracker relative to the human palm. It belongs in the Tracker profile below, separately from robot tool geometry.
 
 `driver.tool_dynamics.source: configured` sends the separate `left` and `right` ten-element arrays to the SDK. `source: controller` uses the cabinet's existing payload parameters. Array order and units are:
 
@@ -134,10 +136,12 @@ The supplied values model each Hand 2.2 in its zero pose with the supplied mount
 | --- | --- |
 | `chest_mount.shared` | Shared chest translation in metres |
 | `chest_mount.left`, `.right` | Per-side roll, pitch, yaw in radians and local translation in metres |
-| `hand_back_to_tcp.left`, `.right` | `qx`, `qy`, `qz`, `qw` orientation alignment; zero translation |
+| `hand_back_to_palm.left`, `.right` | `qx`, `qy`, `qz`, `qw` orientation alignment plus `tracker_offset_m`: palm-to-Tracker displacement, in metres, expressed in aligned human palm axes |
 | `upper_arm_rotations.left_arm`, `.right_arm` | 3×3 rotations whose columns are calibrated axes in the raw Tracker frame |
 
-The raw hand-back Tracker origins supply target position directly. The orientation alignment defines `left_tcp_target` and `right_tcp_target`; the calibrated upper-arm Y axes provide the arm reference directions for IK. Tool translation is supplied only by the robot's flange-to-TCP transforms.
+The supplied `tracker_offset_m` vectors are `[0, -0.05, 0]` on the left and `[0, 0.05, 0]` on the right. They describe the vector from the human palm to the Tracker origin, not coordinates in the raw Tracker axes. At runtime the static TF from `{side}_hand_back` to `{side}_human_palm` uses the quaternion rotation `R` and translation `-R @ tracker_offset_m`. The retargeting node maps that corrected palm pose through the calibrated chest reference into the corresponding robot arm base. The calibrated upper-arm Y axes supply unit directions for IK; upper-arm Tracker positions are unused.
+
+Measure and edit the offsets in the selected profile before running calibration. A static Home capture fits hand orientation first, then corrects the Tracker origins to human palm positions and fits chest/Home alignment against robot palm forward kinematics. It cannot independently measure the 50 mm mounting distance.
 
 Recalibrate after changing tool geometry, Tracker mounting, or arm Home. The [Tracker calibration tool](STEAMVR.md#neutral-pose-calibration) saves the complete profile directly; a symlink build requires only a process restart after saving. MANUS profiles likewise take effect when their publisher restarts.
 
