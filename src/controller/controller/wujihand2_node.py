@@ -12,7 +12,7 @@ from rclpy.utilities import remove_ros_args
 from std_msgs.msg import Int8, String
 
 from wujihand2_ros2 import WujiHand2Controller
-from wujihand2_ros2.keypoints import manus_to_keypoints
+from .manus_keypoints import manus_to_keypoints
 from .common import ROS2LoggerAdapter, get_default_qos, run_ros_node
 
 

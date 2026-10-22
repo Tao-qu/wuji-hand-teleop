@@ -1,4 +1,4 @@
-"""MANUS skeleton conversion, independent of ROS and hardware."""
+"""Controller-side MANUS skeleton conversion, independent of ROS and hardware."""
 from __future__ import annotations
 
 import numpy as np

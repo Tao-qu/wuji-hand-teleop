@@ -20,7 +20,7 @@ Use profiles for the current operator and glove sides. The publisher retries a f
 
 ## Input contract
 
-The conversion in `wujihand2_ros2/keypoints.py` produces a `(21, 3)` float32 array in metres:
+The conversion in `src/controller/controller/manus_keypoints.py` produces a `(21, 3)` float32 array in metres for live retargeting and Preview:
 
 | MediaPipe landmarks | MANUS node IDs |
 | --- | --- |
@@ -33,7 +33,7 @@ The conversion in `wujihand2_ros2/keypoints.py` produces a `(21, 3)` float32 arr
 
 Metadata is mapped by `NodeInfo.nodeId` separately for each glove. Missing metadata uses a default entry. Missing mapped positions remain zero; repeated IDs use their last supplied position. Unmapped IDs are ignored. The conversion does not filter finite values, palm geometry, or hand size.
 
-The publisher requests right-handed coordinates with Z up, X away from the viewer, and metre units through `CoreSdk_InitializeCoordinateSystemWithVUH`. The supplied `controller.flip_y: false` preserves these XYZ positions. Setting it to `true` reflects Y and reverses chirality. The SDK receives the mapped points directly through its built-in Wuji Hand 2 retargeting model.
+The publisher requests right-handed coordinates with Z up, X away from the viewer, and metre units through `CoreSdk_InitializeCoordinateSystemWithVUH`. The supplied `controller.flip_y: false` preserves these XYZ positions. Setting it to `true` reflects Y and reverses chirality. Preview uses the same configured setting as live retargeting. The SDK receives the mapped points directly through its built-in Wuji Hand 2 retargeting model.
 
 `ManusGlove.header.stamp` records ROS time at entry to the SDK raw-skeleton callback. Skeletons copied in that callback share the stamp. `sequence` increases per glove when a callback updates its cache. The publisher runs at approximately 120 Hz and republishes the latest cached skeleton with its original stamp and sequence until another callback arrives. Topic frequency therefore includes repeated samples.
 

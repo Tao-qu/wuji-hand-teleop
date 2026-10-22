@@ -1,6 +1,6 @@
 # Wuji Hand 2.2 ROS adapter
 
-`wujihand2_ros2` connects each hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Each hand runs in its own driver process with its configured serial number and namespace. The package also provides the official retargeting wrapper, MANUS keypoint conversion, and ROS command interface.
+`wujihand2_ros2` connects each hand through the official `wuji-sdk==2026.10.12` typed Hand 2 API. Each hand runs in its own driver process with its configured serial number and namespace. The package also provides the official retargeting wrapper and ROS command interface. MANUS-to-MediaPipe keypoint conversion belongs to `controller/manus_keypoints.py`, shared by live retargeting and Preview.
 
 The ROS package is in `wujihand2_ros2/`. Its sibling `wuji-description/` is the pinned official model checkout; `hand2/hand2_2/body` provides `wuji_hand2_2_description`. The [project setup command](../../../docs/LOCAL_SETUP.md) installs dependencies, fetches that model, and builds both packages.
 

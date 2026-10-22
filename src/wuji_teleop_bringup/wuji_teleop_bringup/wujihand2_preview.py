@@ -1,7 +1,7 @@
 """Visualize MANUS hand targets and Tracker poses on preview topics."""
 from __future__ import annotations
 
-from wujihand2_ros2.keypoints import manus_to_keypoints
+from controller.manus_keypoints import manus_to_keypoints
 from wujihand2_ros2.retargeting import WujiHand2Retargeter
 from wujihand2_ros2.joint_mapping import joint_names
 
@@ -44,15 +44,16 @@ def status_marker_specs(snapshots):
 class HandPreview:
     """Convert the latest MANUS frame into hand preview targets."""
 
-    def __init__(self, side):
+    def __init__(self, side, *, flip_y=False):
         self.names = joint_names(side)
         self.retargeter = WujiHand2Retargeter(side)
+        self.flip_y = flip_y
         self.latest = None
         self.state, self.reason = "NO_INPUT", "Waiting for MANUS frames"
         self.sequence = self.stamp_ns = self.accepted = self.published = self.rejected = 0
 
     def accept(self, message):
-        self.latest = manus_to_keypoints(message, flip_y=False)
+        self.latest = manus_to_keypoints(message, flip_y=self.flip_y)
         self.sequence = message.sequence
         self.stamp_ns = message.header.stamp.sec * 1_000_000_000 + message.header.stamp.nanosec
         self.accepted += 1
@@ -106,8 +107,10 @@ def create_preview_node():
         def __init__(self):
             super().__init__("wujihand2_preview", namespace="preview", enable_rosout=False)
             self.declare_parameter("control_rate", 120.0)
+            self.declare_parameter("flip_y", False)
             rate = float(self.get_parameter("control_rate").value)
-            self.hands = {side: HandPreview(side) for side in ("left", "right")}
+            flip_y = bool(self.get_parameter("flip_y").value)
+            self.hands = {side: HandPreview(side, flip_y=flip_y) for side in ("left", "right")}
             self.outputs = {side: self.create_publisher(JointState, f"/preview/{side}/joint_states", 1)
                             for side in self.hands}
             self.trackers = TrackerPreview()
