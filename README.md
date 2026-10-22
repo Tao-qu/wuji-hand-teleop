@@ -54,7 +54,9 @@ Templates describe the supplied installation; the `.mcal.template` files are com
 
 The arm TCP is the robot palm, with identity flange-to-palm rotation and `[0, 0, 70]` mm translation on both sides. It is not a fingertip frame. The glove-mounted hand-back Trackers have separate offsets from the human palms: `hand_back_to_palm.left/right.tracker_offset_m` records palm-to-Tracker displacement in aligned human palm axes, supplied as `[0, -0.05, 0]` m on the left and `[0, 0.05, 0]` m on the right. Measure these offsets for the wearer and mounting, then [calibrate against arm Home](docs/STEAMVR.md#neutral-pose-calibration).
 
-`manus.left_calibration_file` and `manus.right_calibration_file` select the MANUS profiles by filename. `openvr.calibration_file: tracker.yaml` selects the Tracker profile. Calibration filenames resolve in their respective package calibration directories; absolute paths are also supported. Teleoperation and Preview read the same MANUS settings. See [configuration fields and units](docs/LOCAL_SETUP.md#configuration-reference), [MANUS calibration](src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md), and [Tracker calibration](docs/STEAMVR.md#neutral-pose-calibration).
+`manus.left_calibration_file` and `manus.right_calibration_file` select the MANUS profiles by filename. `openvr.calibration_file: tracker.yaml` selects the runtime Tracker profile. Calibration filenames resolve in their respective package calibration directories; absolute paths are also supported. Teleoperation and Preview read the same MANUS settings.
+
+Tracker calibration reads its output file, `tracker.yaml` by default or the filename passed to `--output`, independently of `openvr.calibration_file`. A missing output file starts from the bundled `tracker.yaml.template`; saving preserves the input profile's measured offsets. See [configuration fields and units](docs/LOCAL_SETUP.md#configuration-reference), [MANUS calibration](src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md), and [Tracker calibration](docs/STEAMVR.md#neutral-pose-calibration).
 
 ## Start teleoperation
 

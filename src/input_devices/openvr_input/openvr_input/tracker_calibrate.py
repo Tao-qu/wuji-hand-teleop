@@ -5,10 +5,9 @@ import signal
 import time
 
 from .tracker_calibration_io import (
-    calibration_path,
     calibration_output_path,
     load_context,
-    load_selected_profile,
+    load_output_profile,
     make_profile,
     save_profile,
 )
@@ -36,7 +35,8 @@ def _parser():
     parser.add_argument(
         "--output", metavar="FILENAME",
         help="YAML filename in the project openvr_input/calibration directory "
-             "(default: tracker.yaml); saving replaces an existing file; paths are not accepted",
+             "(default: tracker.yaml); reuse its offsets if it exists, otherwise use "
+             "50 mm per hand; saving replaces the file; paths are not accepted",
     )
     return parser
 
@@ -132,21 +132,20 @@ def main(argv=None):
 
         config_path = arm_config_path()
         arm_config = load_arm_config(config_path)
+        output = calibration_output_path(
+            "tracker.yaml" if args.output is None else args.output)
         print(f"Arm configuration: {config_path}")
-        print(f"Selected calibration: {calibration_path(arm_config)}")
+        print(f"Calibration file: {output}")
         if args.calibrate:
-            output = calibration_output_path(
-                "tracker.yaml" if args.output is None else args.output)
             if not output.parent.is_dir():
                 raise ValueError(f"Output directory does not exist: {output.parent}")
-            print(f"Output calibration: {output}")
-            context = load_context(arm_config)
+            context = load_context(arm_config, output)
             return _capture_and_fit(context, output)
 
         from .tracker_capture import TrackerCapture
 
         _show_home(arm_config)
-        _show_offsets(load_selected_profile(arm_config))
+        _show_offsets(load_output_profile(output))
         with TrackerCapture(arm_config["openvr"]["tracker_serials"]) as session:
             _show_devices(session.inspect())
         return 0

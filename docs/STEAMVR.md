@@ -51,15 +51,17 @@ Match the five serials to `openvr.tracker_serials` in `src/output_devices/tianji
 | `left_arm` | Left upper arm |
 | `right_arm` | Right upper arm |
 
-The supplied configuration contains the supplied installation's serials. Assign your actual hardware and keep each serial unique. Leave `openvr.calibration_file: tracker.yaml` to use the canonical profile in `src/input_devices/openvr_input/calibration`.
+The supplied configuration contains the supplied installation's serials. Assign your actual hardware and keep each serial unique. Leave `openvr.calibration_file: tracker.yaml` to use the canonical runtime profile in `src/input_devices/openvr_input/calibration`.
 
 `tracker.yaml` is local and ignored by Git. Its adjacent `tracker.yaml.template` is tracked. Setup or `python3 tools/configure.py --profile teleop` copies the template only when the runtime file is missing, preserving an existing calibration.
 
 ## Neutral-pose calibration
 
-Configure arm Home, Tracker serials, and `driver.tool_transforms` before calibration. The robot TCP is the palm: both supplied flange-to-palm transforms have identity rotation and `[0, 0, 70]` mm translation. In the selected Tracker profile, set `hand_back_to_palm.left/right.tracker_offset_m` to the measured palm-to-Tracker displacement in aligned human palm axes. The supplied values are `[0, -0.05, 0]` m on the left and `[0, 0.05, 0]` m on the right. A static Home capture does not measure those mounting distances.
+Configure arm Home, Tracker serials, and `driver.tool_transforms` before calibration. The robot TCP is the palm: both supplied flange-to-palm transforms have identity rotation and `[0, 0, 70]` mm translation. In the output Tracker profile, set `hand_back_to_palm.left/right.tracker_offset_m` to the measured palm-to-Tracker displacement in aligned human palm axes. The supplied values are `[0, -0.05, 0]` m on the left and `[0, 0.05, 0]` m on the right. A static Home capture does not measure those mounting distances.
 
-Keep SteamVR running and stop other OpenVR input processes. The tool reads the default local arm configuration, selected profile, Tracker poses, and local kinematics; it does not connect to the cabinet.
+The output profile is `tracker.yaml` unless `--output FILENAME` selects another filename. Calibration reads that file when it exists; otherwise it starts from the bundled `tracker.yaml.template`, including its measured offsets. `openvr.calibration_file` selects the runtime profile and does not select calibration input.
+
+Keep SteamVR running and stop other OpenVR input processes. The tool reads Tracker serials, Home, and tool geometry from the default local arm configuration, plus the input profile and Tracker poses. It computes forward kinematics locally without connecting to the cabinet.
 
 ```bash
 source tools/env.sh
@@ -67,17 +69,17 @@ ros2 run openvr_input tracker_calibrate --inspect
 ros2 run openvr_input tracker_calibrate --calibrate
 ```
 
-Inspection is the default mode. It displays the configured Home and each Tracker's status. Calibration follows this sequence:
+Inspection is the default mode. It displays the configured Home, measured offsets, and each Tracker's status, reading `tracker.yaml` with the same template fallback. `--output` is accepted only with `--calibrate`. Calibration follows this sequence:
 
 1. Stand upright with upper arms naturally spread, elbows bent, hands in front, and palms down. Keep the pose symmetric.
 2. Press Enter when ready. After the three-second countdown, hold still with all five Trackers visible for the five-second capture.
 3. Review the displayed fit errors and valid frame count, then enter `save`, `retry`, or `cancel`.
 
-The fit first aligns hand orientations, then subtracts the configured Tracker offsets to obtain human palm positions. It fits the chest/Home reference against the robot palm poses computed by forward kinematics at Home and calibrates upper-arm orientation.
+The fit first aligns hand orientations, then subtracts the measured Tracker offsets to obtain human palm positions. It fits local chest placement against the robot palm poses computed by forward kinematics at Home and calibrates upper-arm orientation. The saved profile preserves the input offsets, shared chest translation, and per-side chest rotation conventions while updating the hand alignment, local chest placement, and upper-arm rotations.
 
-Saving writes `src/input_devices/openvr_input/calibration/tracker.yaml` in a symlink build. The directory is fixed by the package; a regular install uses its package-share calibration directory. A successful save replaces the existing profile after writing it completely. Cancellation leaves the existing file unchanged.
+By default, saving writes `src/input_devices/openvr_input/calibration/tracker.yaml` in a symlink build. The directory is fixed by the package; a regular install uses its package-share calibration directory. A successful save replaces the existing profile after writing it completely. Cancellation leaves the existing file unchanged.
 
-`--output FILENAME` optionally selects another filename in the same directory; paths are not accepted. If used, set `openvr.calibration_file` to that filename. The configured value may be a package calibration filename or an absolute path. For the normal canonical workflow, no selection change is needed after saving `tracker.yaml`.
+`--output FILENAME` selects both the input and saved profile in the same directory; paths are not accepted. To use that profile at runtime, set `openvr.calibration_file` to its filename. That runtime setting may be a package calibration filename or an absolute path. For the normal canonical workflow, no selection change is needed after saving `tracker.yaml`.
 
 Restart input and teleoperation processes after saving. No rebuild is required with the symlink setup. Measure and update the profile offsets when the glove mounting changes, then recalibrate. Recalibrate after other Tracker mounting changes, flange-to-palm geometry changes, or arm Home changes.
 

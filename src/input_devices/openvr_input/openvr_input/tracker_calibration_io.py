@@ -64,12 +64,19 @@ def load_selected_profile(arm_config):
     return read_config(calibration_path(arm_config))
 
 
-def load_context(arm_config):
+def load_output_profile(output):
+    """Use the output profile, or the input package's defaults for a new file."""
+    output = Path(output)
+    source = output if output.exists() else calibration_directory() / "tracker.yaml.template"
+    return read_config(source)
+
+
+def load_context(arm_config, output):
     from tianji_output.configuration import kinematics_path
 
     return {
         "arm_config": arm_config,
-        "profile": load_selected_profile(arm_config),
+        "profile": load_output_profile(output),
         "kinematics_path": str(kinematics_path(arm_config)),
     }
 

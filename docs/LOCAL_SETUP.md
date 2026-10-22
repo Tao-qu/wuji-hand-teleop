@@ -107,7 +107,7 @@ Bringup sets `auto_enable: true` for selected hand drivers. The canonical profil
 | `controller.handoff_hold_sec`, `handoff_ramp_sec` | Measured-pose hold and blend into Tracker following, in seconds |
 | `openvr.tracker_serials` | Distinct serials for `chest`, `left_hand_back`, `right_hand_back`, `left_arm`, `right_arm` |
 | `openvr.publish_rate_hz`, `publish_tf`, `parent_frame` | Tracker publication rate, TF switch, and world frame |
-| `openvr.calibration_file` | Tracker calibration filename or absolute path; supplied value `tracker.yaml` |
+| `openvr.calibration_file` | Runtime Tracker calibration filename or absolute path; supplied value `tracker.yaml` |
 
 The supplied arm Home is left `[55, -65, -70, -60, 60, 0, 0]` and right `[-55, -65, 70, -60, -60, 0, 0]` degrees. Normal startup enters position mode, moves Home, then enters joint-impedance mode. The launch preparation interval is fixed at three seconds. Disable requests standby while keeping the connection. The shared `/tianji_arm/driver` owns the connection and serializes SDK operations; an enable or disable request waits for an operation already running. `/tracker_arm_retarget` reads TF and publishes palm targets and upper-arm directions. `/tianji_arm_controller` runs pure local IK from those typed messages, measured joint feedback, and driver lifecycle state.
 
@@ -141,7 +141,9 @@ The supplied values model each Hand 2.2 in its zero pose with the supplied mount
 
 The supplied `tracker_offset_m` vectors are `[0, -0.05, 0]` on the left and `[0, 0.05, 0]` on the right. They describe the vector from the human palm to the Tracker origin, not coordinates in the raw Tracker axes. At runtime the static TF from `{side}_hand_back` to `{side}_human_palm` uses the quaternion rotation `R` and translation `-R @ tracker_offset_m`. The retargeting node maps that corrected palm pose through the calibrated chest reference into the corresponding robot arm base. The calibrated upper-arm Y axes supply unit directions for IK; upper-arm Tracker positions are unused.
 
-Measure and edit the offsets in the selected profile before running calibration. A static Home capture fits hand orientation first, then corrects the Tracker origins to human palm positions and fits chest/Home alignment against robot palm forward kinematics. It cannot independently measure the 50 mm mounting distance.
+Measure and edit the offsets in the calibration output profile before running calibration. `tracker_calibrate --calibrate` reads and saves `tracker.yaml`, or the filename supplied with `--output`; a missing output file starts from the bundled `tracker.yaml.template`. This input choice is independent of the runtime `openvr.calibration_file` setting. Inspection always reads `tracker.yaml` with the same fallback.
+
+A static Home capture fits hand orientation first, then corrects the Tracker origins to human palm positions and fits local chest placement against robot palm forward kinematics. It preserves measured offsets, shared chest translation, and per-side chest rotation conventions while updating hand alignment, local chest placement, and upper-arm rotations. It cannot independently measure the 50 mm mounting distance. The tool reads Tracker serials, Home, and tool geometry from the local arm configuration and uses local forward kinematics without connecting to the cabinet.
 
 Recalibrate after changing tool geometry, Tracker mounting, or arm Home. The [Tracker calibration tool](STEAMVR.md#neutral-pose-calibration) saves the complete profile directly; a symlink build requires only a process restart after saving. MANUS profiles likewise take effect when their publisher restarts.
 
