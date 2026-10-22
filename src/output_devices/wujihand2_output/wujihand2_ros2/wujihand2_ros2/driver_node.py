@@ -36,7 +36,9 @@ class WujiHand2DriverNode(Node):
         self._auto_enable = bool(param("auto_enable"))
         self._command_rate = float(param("command_rate"))
         self._kp, self._kd = float(param("kp")), float(param("kd"))
-        self._backend = SdkBackend(self._serial_number, self._side)
+        self._backend = SdkBackend(
+            self._serial_number, self._side,
+            timestamp_ns=lambda: self.get_clock().now().nanoseconds)
         self._requests = queue.Queue()
         self._command_lock = threading.Lock()
         self._latest_command = None
@@ -53,6 +55,8 @@ class WujiHand2DriverNode(Node):
             JointState, "joint_commands", self._on_command,
             QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
         self._state_pub = self.create_publisher(JointState, "joint_states", qos_profile_sensor_data)
+        self._submitted_pub = self.create_publisher(
+            JointState, "commanded_joint_states", qos_profile_sensor_data)
         lifecycle_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                   durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._lifecycle_pub = self.create_publisher(String, "lifecycle_state", lifecycle_qos)
@@ -68,6 +72,11 @@ class WujiHand2DriverNode(Node):
     def _on_command(self, msg):
         try:
             values = joint_vector(msg.position)
+            if msg.name:
+                if len(msg.name) != len(values) or set(msg.name) != set(self._names):
+                    raise ValueError("joint names must identify all twenty hand joints")
+                by_name = dict(zip(msg.name, values))
+                values = tuple(by_name[name] for name in self._names)
         except (ValueError, TypeError) as exc:
             self.get_logger().error(f"Invalid joint command: {exc}")
             return
@@ -147,6 +156,11 @@ class WujiHand2DriverNode(Node):
                     values, received_at = command
                     try:
                         self._backend.send(values)
+                        submitted = JointState()
+                        submitted.header.stamp = self.get_clock().now().to_msg()
+                        submitted.name = list(self._names)
+                        submitted.position = list(values)
+                        self._submitted_pub.publish(submitted)
                         self._command_at = received_at
                         self._lifecycle = "ACTIVE"
                         self._operation_error = ""
@@ -183,7 +197,7 @@ class WujiHand2DriverNode(Node):
         if sample is None or sample.received_at == self._last_published_sample:
             return
         msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp.sec, msg.header.stamp.nanosec = divmod(sample.received_stamp_ns, 1_000_000_000)
         msg.name = list(self._names)
         msg.position = list(sample.positions)
         msg.velocity = list(sample.velocities)

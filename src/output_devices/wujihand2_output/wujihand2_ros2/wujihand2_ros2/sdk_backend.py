@@ -9,6 +9,7 @@ from .joint_mapping import joint_vector, ordered_entries
 @dataclass(frozen=True)
 class StateSample:
     received_at: float
+    received_stamp_ns: int
     positions: tuple
     velocities: tuple
 
@@ -37,12 +38,14 @@ class Snapshot:
 
 
 class SdkBackend:
-    def __init__(self, serial_number, expected_side, sdk=None, monotonic=time.monotonic):
+    def __init__(self, serial_number, expected_side, sdk=None, monotonic=time.monotonic,
+                 timestamp_ns=time.time_ns):
         self.serial_number = serial_number
         self.expected_side = expected_side
         self.firmware_version = ""
         self._sdk = sdk
         self._clock = monotonic
+        self._timestamp_ns = timestamp_ns
         self._hand = None
         self._publisher = None
         self._subscriptions = []
@@ -75,9 +78,10 @@ class SdkBackend:
             self._stream_errors[stream] = str(error)
 
     def _on_states(self, frame):
+        received_at, received_stamp_ns = self._clock(), self._timestamp_ns()
         try:
             entries = ordered_entries(frame.joints)
-            sample = StateSample(self._clock(),
+            sample = StateSample(received_at, received_stamp_ns,
                                  joint_vector([j.position for j in entries]),
                                  joint_vector([j.velocity for j in entries]))
             with self._cache_lock:

@@ -52,15 +52,18 @@ Interfaces are relative to the driver namespace, normally `/left_hand` or `/righ
 
 | Interface | ROS type | Content |
 | --- | --- | --- |
-| `joint_commands` | `sensor_msgs/JointState` | Twenty target positions in radians, firmware order |
-| `joint_states` | `sensor_msgs/JointState` | SDK positions and velocities with joint names |
+| `joint_commands` | `sensor_msgs/JointState` | Twenty named target positions in radians |
+| `commanded_joint_states` | `sensor_msgs/JointState` | Named targets submitted to the SDK, stamped after each successful send |
+| `joint_states` | `sensor_msgs/JointState` | SDK positions and velocities with joint names, stamped when the callback receives the sample |
 | `diagnostics` | `diagnostic_msgs/DiagnosticArray` | Device status, motor current, temperature, voltage, and joint error codes |
 | `lifecycle_state` | `std_msgs/String` | Driver lifecycle state |
 | `set_enabled` | `std_srvs/srv/SetBool` | Queue enable or disable |
 | `emergency_stop` | `std_srvs/srv/Trigger` | Queue SDK emergency stop |
 | `clear_fault` | `std_srvs/srv/Trigger` | Queue SDK fault clearing |
 
-Commands use the `position` array directly. Names, velocity, effort, and ROS timestamps do not change target interpretation. The worker sends SDK `JointCommand(position, 0.0, 0.0)` values while enabled and retains the latest target between messages.
+Project controllers and Home publish names in firmware order. A named command is reordered by joint name; an unnamed command uses firmware order. Velocity, effort, and ROS timestamps do not change target interpretation. The worker sends SDK `JointCommand(position, 0.0, 0.0)` values while enabled and retains the latest target between messages.
+
+`commanded_joint_states` reports each successful SDK submission, including repeated submissions of the current target at the configured command rate. Its timestamp is the submission time, not a measured arrival time. Record this stream for submitted actions and `joint_states` for observations. Feedback timestamps identify host receipt in the SDK callback, not a device hardware clock or the later ROS publication timer.
 
 | Finger | Command indices | Feedback joint NIDs |
 | --- | --- | --- |

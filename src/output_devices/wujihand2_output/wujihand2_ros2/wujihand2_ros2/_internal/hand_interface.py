@@ -7,12 +7,14 @@ from typing import Optional
 
 import numpy as np
 
+from ..joint_mapping import joint_names
+
 
 class WujiHand2:
     """Publish targets and read feedback through the Hand 2 ROS driver.
 
     The bridge publishes states in SDK firmware order (five fingers, four joints
-    each). Commands intentionally omit names and use that same documented order.
+    each). Commands include the model joint names in that same order.
     Enable/disable belongs to the driver's SetBool service.
     """
 
@@ -59,6 +61,7 @@ class WujiHand2:
                 return False
             msg = self._joint_state_type()
             msg.header.stamp = self.node.get_clock().now().to_msg()
+            msg.name = list(joint_names(self.side))
             msg.position = positions.tolist()
             self._cmd_pub.publish(msg)
             return True
