@@ -192,6 +192,7 @@ On the Jetson, stop the existing GMSL application before starting capture:
 sudo systemctl stop tj-camera-stream.service
 cd ~/Workspace/wuji-hand-teleop
 source install_camera/camera_env.sh
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 ros2 run camera_bringup init_gmsl.sh
 ros2 launch camera_bringup cameras.launch.py
 ```

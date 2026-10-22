@@ -47,7 +47,8 @@ transform is invented for either camera family.
   are prerequisites, not copies of the previous streaming application.
 - D435 connected over USB 3, with RealSense udev rules installed.
 - Desktop and Jetson on a common network and synchronized system clocks. Use the
-  same `ROS_DOMAIN_ID` on both machines (ROS default is 0).
+  same `ROS_DOMAIN_ID` on both machines and `ROS_LOCALHOST_ONLY=0` for desktop
+  subscriptions. The camera environment preserves these shell settings.
 - SSH access and rsync on both machines for the remote deployment script.
 
 The build uses Ubuntu GStreamer/OpenCV/yaml-cpp development packages and the
@@ -159,6 +160,7 @@ cameras. Stop it before starting the new GMSL node:
 sudo systemctl stop tj-camera-stream.service
 cd ~/Workspace/wuji-hand-teleop
 source install_camera/camera_env.sh
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 ros2 run camera_bringup init_gmsl.sh
 ros2 launch camera_bringup cameras.launch.py
 ```
@@ -171,6 +173,10 @@ Stop the launch with Ctrl+C. To return to the existing camera application:
 ```bash
 sudo systemctl start tj-camera-stream.service
 ```
+
+In the desktop viewer terminal, source `tools/env.sh` and set the same
+`export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0`. These exports apply to that terminal
+and its child processes; they do not change system settings.
 
 On a new Jetson without that service, omit the two `systemctl` commands. To start
 only one camera family:
