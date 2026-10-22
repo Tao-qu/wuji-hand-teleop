@@ -133,6 +133,8 @@ void GmslCameraNode::run(Channel& channel) {
     channel.error = error.what();
     RCLCPP_ERROR(get_logger(), "%s: %s", channel.name.c_str(), error.what());
   }
+  // Drain each Argus pipeline on its worker so all four close in parallel.
+  channel.capture.reset();
 }
 
 void GmslCameraNode::publish_diagnostics() {
