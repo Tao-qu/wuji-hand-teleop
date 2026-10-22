@@ -18,7 +18,7 @@ CaptureBackend::CaptureBackend(int sensor_id, int width, int height, int fps) {
   gst_init(nullptr, nullptr);
   const std::string description =
       "nvarguscamerasrc sensor-id=" + std::to_string(sensor_id) +
-      " ! video/x-raw(memory:NVMM),format=NV12,width=" + std::to_string(width) +
+      " sensor-mode=0 ! video/x-raw(memory:NVMM),format=NV12,width=" + std::to_string(width) +
       ",height=" + std::to_string(height) + ",framerate=" + std::to_string(fps) +
       "/1 ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! "
       "video/x-raw,format=RGB ! appsink name=frames max-buffers=2 drop=true sync=false";

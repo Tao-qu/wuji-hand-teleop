@@ -23,7 +23,8 @@ Two processes run under `/cameras`:
 Each stream has a corresponding `camera_info` topic. RealSense depth values are
 millimeters in the published ROS image. The GMSL images are full sensor-output
 resolution, with color conversion only: no rectification, resize, rotation, overlay,
-or stitching. These are RGB images from the Argus NV12 stream, not Bayer RAW.
+or stitching. The backend selects Argus sensor mode 0 for the supplied GEAC cameras.
+These are RGB images from the Argus NV12 stream, not Bayer RAW.
 
 For each GMSL role, `/cameras/<role>/preview/compressed` publishes JPEG previews
 only while subscribed (default width 640, maximum 10 fps, quality 80). Preview
