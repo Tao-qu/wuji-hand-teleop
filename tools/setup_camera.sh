@@ -96,19 +96,6 @@ PY
 fi
 
 /usr/bin/python3 tools/configure.py --profile camera
-# This generated environment helper is kept with build output, not with configuration.
-mkdir -p install_camera
-cat > install_camera/camera_env.sh <<'ENV'
-# Source this in a fresh terminal before using camera launch files.
-CAMERA_ENV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source /opt/ros/humble/setup.bash
-CAMERA_DEP_PREFIX="$CAMERA_ENV_ROOT/camera_dependencies/root/opt/ros/humble"
-if [[ -f "$CAMERA_DEP_PREFIX/local_setup.bash" ]]; then
-    source "$CAMERA_DEP_PREFIX/local_setup.bash"
-fi
-[[ ! -f "$CAMERA_ENV_ROOT/install_camera/local_setup.bash" ]] || source "$CAMERA_ENV_ROOT/install_camera/local_setup.bash"
-unset CAMERA_DEP_PREFIX CAMERA_ENV_ROOT
-ENV
 if [[ -f "$CAMERA_SETUP_ROOT/camera_dependencies/root/opt/ros/humble/local_setup.bash" ]]; then
     source "$CAMERA_SETUP_ROOT/camera_dependencies/root/opt/ros/humble/local_setup.bash"
 fi
@@ -133,4 +120,4 @@ fi
     --install-base "$CAMERA_SETUP_ROOT/install_camera" \
     --symlink-install --parallel-workers 2 --event-handlers console_cohesion+ \
     --cmake-args -DBUILD_TESTING=OFF -DPython3_EXECUTABLE=/usr/bin/python3
-printf '\nCamera build complete. Source install_camera/camera_env.sh. See docs/CAMERAS.md for the explicit service handoff.\n'
+printf '\nCamera build complete. On the Jetson: source tools/camera_env.sh. See docs/CAMERAS.md for capture commands.\n'

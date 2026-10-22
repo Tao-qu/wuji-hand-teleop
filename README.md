@@ -178,7 +178,7 @@ The arm driver provides `/tianji_arm/set_enabled`, `/tianji_arm/set_arm_state`, 
 
 ## Jetson cameras
 
-Deploy the camera source and build it on the Jetson:
+On the **desktop**, deploy the camera source and build it on the Jetson:
 
 ```bash
 ./tools/deploy_camera.sh --user-deps
@@ -186,18 +186,28 @@ Deploy the camera source and build it on the Jetson:
 
 This uses the existing Jetson native dependencies and downloads missing ROS camera packages into a local prefix. The default destination is `nvidia@6.6.7.100:/home/nvidia/Workspace/wuji-hand-teleop`. For a new Jetson, install the prerequisites described in [Cameras](docs/CAMERAS.md) first.
 
-On the Jetson, stop the existing GMSL application before starting capture:
+Connect to the **Jetson**, then initialize and start capture there:
 
 ```bash
-sudo systemctl stop tj-camera-stream.service
+ssh nvidia@6.6.7.100
 cd ~/Workspace/wuji-hand-teleop
-source install_camera/camera_env.sh
+source tools/camera_env.sh
 export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 ros2 run camera_bringup init_gmsl.sh
 ros2 launch camera_bringup cameras.launch.py
 ```
 
 `/cameras/gmsl` publishes independent `head_left`, `head_right`, `left_wrist`, and `right_wrist` images, each at 2560 × 1984 with 30 fps requested. `/cameras/d435` uses the official RealSense driver for 1280 × 720 color and depth at 30 fps. Ctrl-C stops both processes. `gmsl:=false` or `d435:=false` selects one camera family.
+
+On the **desktop**, load the teleoperation environment for ROS subscriptions:
+
+```bash
+cd ~/Workspace/wuji-hand-teleop
+source tools/env.sh
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+```
+
+`tools/camera_env.sh` loads the Jetson camera build; `tools/env.sh` loads the desktop teleoperation build. Deploying cameras does not create `install_camera/` on the desktop.
 
 Keep full-resolution capture and recording on the Jetson: the four GMSL RGB streams alone would require about 14.6 Gbit/s at 30 fps. Desktop viewers can use `/cameras/<role>/preview/compressed`. See [camera topics, configuration, timestamps, and deployment](docs/CAMERAS.md) for details.
 

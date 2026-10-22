@@ -32,7 +32,8 @@ rsync -a --protect-args --exclude='__pycache__/' --exclude='*.pyc' \
     --exclude='*.yaml' \
     "$CAMERA_DEPLOY_ROOT/src/camera/" "$remote_host:$remote_path/src/camera/"
 rsync -a --protect-args "$CAMERA_DEPLOY_ROOT/tools/setup_camera.sh" \
-    "$CAMERA_DEPLOY_ROOT/tools/configure.py" "$remote_host:$remote_path/tools/"
+    "$CAMERA_DEPLOY_ROOT/tools/configure.py" "$CAMERA_DEPLOY_ROOT/tools/camera_env.sh" \
+    "$remote_host:$remote_path/tools/"
 rsync -a --protect-args "$CAMERA_DEPLOY_ROOT/docs/CAMERAS.md" "$remote_host:$remote_path/docs/"
 printf -v setup_command '%q ' bash "$remote_path/tools/setup_camera.sh" "${setup_options[@]}"
 if [[ " ${setup_options[*]} " != *" --user-deps "* && " ${setup_options[*]} " != *" --skip-system "* ]]; then

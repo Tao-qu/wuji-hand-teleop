@@ -58,6 +58,18 @@ It does not require `jetson-utils` or the previous application's shared library.
 The Argus pipeline follows NVIDIA's
 [JetPack 6 GStreamer interface](https://docs.nvidia.com/jetson/archives/r36.4.4/DeveloperGuide/SD/Multimedia/AcceleratedGstreamer.html).
 
+## Environment entry points
+
+| Machine | Build | Environment |
+| --- | --- | --- |
+| Desktop | `./tools/setup.sh` | `source tools/env.sh` |
+| Jetson | `./tools/setup_camera.sh` | `source tools/camera_env.sh` |
+
+Run each environment command from that machine's checkout. Deployment builds
+`install_camera/` on the Jetson only. The camera environment helper is tracked in
+`tools/`; it loads system Python, ROS Humble, the optional private dependencies,
+and the camera overlay, clearing inherited workspace paths.
+
 ## Install directly on the Jetson
 
 Clone this repository on the Jetson, then:
@@ -65,7 +77,7 @@ Clone this repository on the Jetson, then:
 ```bash
 cd ~/Workspace/wuji-hand-teleop
 ./tools/setup.sh --profile camera
-source install_camera/camera_env.sh
+source tools/camera_env.sh
 ```
 
 `./tools/setup_camera.sh` is the equivalent camera-only entry point. The script
@@ -91,7 +103,7 @@ sudo apt-get install build-essential cmake pkg-config python3-yaml \
 ./tools/setup_camera.sh --user-deps
 ```
 
-The private dependency prefix is included by `install_camera/camera_env.sh`.
+The private dependency prefix is included by `tools/camera_env.sh`.
 This mode downloads only missing ROS packages. Development-only dependencies of
 prebuilt ROS packages are reported and skipped; missing native runtime dependencies
 are reported with an apt installation command. The RealSense component's dynamic
@@ -115,7 +127,7 @@ The defaults are `nvidia@6.6.7.100` and
   --path /home/nvidia/Workspace/wuji-hand-teleop --user-deps
 ```
 
-The script uses SSH and rsync to copy `src/camera`, the camera setup and configuration
+The script uses SSH and rsync to copy `src/camera`, the camera setup, environment, and configuration
 tools, and this document. It then performs the camera-only build remotely. It does
 not transfer desktop build products, SDKs, credentials, or local camera YAML files.
 Existing destination camera YAML files are preserved; missing files are initialized
@@ -154,42 +166,50 @@ checkout is moved. Restart the camera launch after changing configuration.
 
 ## Start and stop
 
-On the supplied Jetson, the existing `tj-camera-stream.service` owns the same Argus
-cameras. Stop it before starting the new GMSL node:
+Open a Jetson terminal from the **desktop**:
 
 ```bash
-sudo systemctl stop tj-camera-stream.service
+ssh nvidia@6.6.7.100
+```
+
+Run these commands **on the Jetson**:
+
+```bash
 cd ~/Workspace/wuji-hand-teleop
-source install_camera/camera_env.sh
+source tools/camera_env.sh
 export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 ros2 run camera_bringup init_gmsl.sh
 ros2 launch camera_bringup cameras.launch.py
 ```
 
-The explicit initializer uses the vendor `init 15` operation once per boot and
-shares the existing service's initialization marker. It does not run capture.
-Once initialization has completed, subsequent starts in the same boot reuse it.
-Stop the launch with Ctrl+C. To return to the existing camera application:
+The initializer requests sudo and performs the vendor `init 15` operation once per
+boot. It does not run capture. Subsequent starts in the same boot reuse completed
+initialization. Ctrl+C stops both camera processes. Only one application may own
+the Argus cameras or D435 at a time; stop any other capture application first.
+
+In a separate **desktop** terminal:
 
 ```bash
-sudo systemctl start tj-camera-stream.service
+cd ~/Workspace/wuji-hand-teleop
+source tools/env.sh
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+ros2 topic echo /cameras/head_left/camera_info --once --qos-reliability best_effort
 ```
 
-In the desktop viewer terminal, source `tools/env.sh` and set the same
-`export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0`. These exports apply to that terminal
-and its child processes; they do not change system settings.
+The ROS exports apply to each terminal and its child processes; they do not change
+system settings. Use the same domain on both hosts. A ROS CLI daemon started with
+different settings can cache a different graph; run `ros2 daemon stop` in that
+terminal before inspecting the graph again.
 
-On a new Jetson without that service, omit the two `systemctl` commands. To start
-only one camera family:
+To start only one camera family **on the Jetson**:
 
 ```bash
 ros2 launch camera_bringup gmsl.launch.py
 ros2 launch camera_bringup d435.launch.py
 ```
 
-The combined launch also accepts `gmsl:=false` or `d435:=false`. Launching D435 alone
-does not require stopping the GMSL-only service, provided no other application
-holds the D435. No camera command enables or moves the robot.
+The combined launch also accepts `gmsl:=false` or `d435:=false`. D435 alone does not
+need the GEAC initializer. No camera command enables or moves the robot.
 
 ## Timing, bandwidth, and data collection
 
