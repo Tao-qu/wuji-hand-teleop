@@ -18,10 +18,11 @@ setup(
     zip_safe=True,
     maintainer='Wuji Robotics',
     maintainer_email='dev@wuji.com',
-    description='MANUS hand control and HTC Tracker arm control nodes',
+    description='MANUS hand control, Tracker retargeting, and arm IK nodes',
     license='MIT',
     entry_points={
         'console_scripts': [
+            'tracker_arm_retarget = controller.tracker_arm_retarget_node:main',
             'tianji_arm_controller = controller.tianji_arm_node:main',
             'wujihand2_controller = controller.wujihand2_node:main',
         ],

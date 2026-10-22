@@ -57,9 +57,9 @@ Visualization Manager:
         Value: true
       right_hand_back:
         Value: true
-      left_tcp_target:
+      left_human_palm:
         Value: true
-      right_tcp_target:
+      right_human_palm:
         Value: true
       world:
         Value: true
@@ -102,14 +102,14 @@ Visualization Manager:
     Length: 0.30000001192092896
     Name: Right TCP Target
     Radius: 0.02500000037252903
-    Reference Frame: right_tcp_target
+    Reference Frame: right_human_palm
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.30000001192092896
     Name: Left TCP Target
     Radius: 0.02500000037252903
-    Reference Frame: left_tcp_target
+    Reference Frame: left_human_palm
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true

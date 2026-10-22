@@ -8,6 +8,7 @@ from .tracker_calibration_io import (
     calibration_path,
     calibration_output_path,
     load_context,
+    load_selected_profile,
     make_profile,
     save_profile,
 )
@@ -22,7 +23,7 @@ def _interrupt(signum, frame):
 
 def _parser():
     parser = argparse.ArgumentParser(
-        description="Inspect or calibrate five Trackers against the configured arm Home.",
+        description="Inspect or calibrate five Trackers against the configured Home palm poses.",
         epilog="Calibration reads OpenVR and local kinematics only. "
                "Select the exported profile with openvr.calibration_file in the arm "
                "configuration, then restart teleoperation.",
@@ -52,14 +53,21 @@ def _show_home(arm_config):
         print(f"  {side}: {arm_config[side + '_arm']['home_joints']}")
 
 
+def _show_offsets(profile):
+    print("\nHuman palm origin -> Tracker origin in aligned palm axes (metres):")
+    for side in ("left", "right"):
+        print(f"  {side}: {profile['hand_back_to_palm'][side]['tracker_offset_m']}")
+    print("These measured offsets are preserved; one Home capture cannot estimate them.")
+
+
 def _show_fit(result):
     fit = result["fit"]
-    print("\nMirror-constrained fit relative to Home:")
+    print("\nMirror-constrained palm fit relative to Home:")
     for side in ("left", "right"):
         values = fit[side]
         print(
             f"  {side}: position {values['mean_position_error_mm']:.3f} mm, "
-            f"TCP orientation {values['mean_tcp_angle_deg']:.3f} deg, "
+            f"palm orientation {values['mean_palm_angle_deg']:.3f} deg, "
             f"upper arm {values['mean_upper_direction_angle_deg']:.3f} deg"
         )
 
@@ -70,12 +78,14 @@ def _capture_and_fit(context, output):
 
     arm_config = context["arm_config"]
     _show_home(arm_config)
+    _show_offsets(context["profile"])
     with TrackerCapture(arm_config["openvr"]["tracker_serials"]) as session:
         _show_devices(session.inspect())
         while True:
             print(
                 "\nStand upright with both upper arms naturally spread, elbows bent, "
-                "hands in front and palms down. Keep the pose symmetric and all five "
+                "hands in front and palms down to match the Home palm poses. "
+                "Keep the pose symmetric and all five "
                 "Trackers visible."
             )
             input("Press Enter when ready; capture starts after a 3-second countdown. ")
@@ -136,6 +146,7 @@ def main(argv=None):
         from .tracker_capture import TrackerCapture
 
         _show_home(arm_config)
+        _show_offsets(load_selected_profile(arm_config))
         with TrackerCapture(arm_config["openvr"]["tracker_serials"]) as session:
             _show_devices(session.inspect())
         return 0

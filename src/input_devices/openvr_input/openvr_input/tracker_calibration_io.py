@@ -12,7 +12,7 @@ from ruamel.yaml.comments import CommentedSeq
 SIDES = ("left", "right")
 CHEST_KEYS = ("roll", "pitch", "yaw", "local_x", "local_y", "local_z")
 QUATERNION_KEYS = ("qx", "qy", "qz", "qw")
-PROFILE_KEYS = ("chest_mount", "hand_back_to_tcp", "upper_arm_rotations")
+PROFILE_KEYS = ("chest_mount", "hand_back_to_palm", "upper_arm_rotations")
 
 
 def read_config(path):
@@ -87,7 +87,7 @@ def validate_profile(profile):
         raise ValueError("Expected a Tracker calibration mapping")
     try:
         chest = profile["chest_mount"]
-        hand_back_to_tcp = profile["hand_back_to_tcp"]
+        hand_back_to_palm = profile["hand_back_to_palm"]
         upper = profile["upper_arm_rotations"]
         for axis in ("x", "y", "z"):
             _number(chest["shared"][axis], f"chest_mount.shared.{axis}")
@@ -95,10 +95,15 @@ def validate_profile(profile):
             for key in CHEST_KEYS:
                 _number(chest[side][key], f"chest_mount.{side}.{key}")
             for key in QUATERNION_KEYS:
-                _number(hand_back_to_tcp[side][key], f"hand_back_to_tcp.{side}.{key}")
-            norm = sum(hand_back_to_tcp[side][key] ** 2 for key in QUATERNION_KEYS)
+                _number(hand_back_to_palm[side][key], f"hand_back_to_palm.{side}.{key}")
+            norm = sum(hand_back_to_palm[side][key] ** 2 for key in QUATERNION_KEYS)
             if not math.isclose(norm, 1.0, rel_tol=1e-6, abs_tol=1e-6):
-                raise ValueError(f"{side} hand-back-to-TCP quaternion must have unit length")
+                raise ValueError(f"{side} hand-back-to-palm quaternion must have unit length")
+            offset = hand_back_to_palm[side]["tracker_offset_m"]
+            if not isinstance(offset, (list, tuple)) or len(offset) != 3:
+                raise ValueError(f"{side} tracker_offset_m must contain three coordinates")
+            for value in offset:
+                _number(value, f"hand_back_to_palm.{side}.tracker_offset_m")
             matrix = upper[side + "_arm"]
             if len(matrix) != 3 or any(len(row) != 3 for row in matrix):
                 raise ValueError(f"{side} upper-arm rotation must be 3x3")

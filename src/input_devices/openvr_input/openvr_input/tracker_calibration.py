@@ -11,8 +11,26 @@ TRACKER_MIRROR = np.diag([-1.0, 1.0, 1.0])
 ARM_MIRROR = np.diag([1.0, -1.0, 1.0])
 
 
+def hand_back_to_palm_transform(profile, side):
+    """Return the nominal-corrected hand-back -> human-palm transform.
+
+    ``tracker_offset_m`` points from the human palm origin to the Tracker origin,
+    expressed in the aligned human palm axes. The wrapper already applies the
+    nominal hand-back correction, so only the calibrated rotation belongs here.
+    """
+    alignment = profile["hand_back_to_palm"][side]
+    transform = np.eye(4)
+    transform[:3, :3] = Rotation.from_quat(
+        [alignment[key] for key in ("qx", "qy", "qz", "qw")]
+    ).as_matrix()
+    transform[:3, 3] = -transform[:3, :3] @ np.asarray(
+        alignment["tracker_offset_m"], dtype=float
+    )
+    return transform
+
+
 def home_reference(context):
-    """Calculate the configured Home TCP and upper-arm directions locally."""
+    """Calculate the configured Home palm pose and upper-arm directions locally."""
     # Load the native SDK only when calculating the Home reference.
     from tianji_output._internal.fx_kine import Marvin_Kine
     from tianji_output.tool_parameters import tool_transform
@@ -25,7 +43,7 @@ def home_reference(context):
         raise RuntimeError(f"Cannot load kinematics model: {model_path}")
 
     reference = {
-        "home_tcp": {},
+        "home_palm": {},
         "upper_arm_directions": {},
     }
     for index, side in enumerate(SIDES):
@@ -44,8 +62,8 @@ def home_reference(context):
         result = kine.fk(index, joints)
         if result is False or result is None:
             raise RuntimeError(f"Cannot calculate {side} Home FK")
-        tcp = np.asarray(result, dtype=float)
-        tcp[:3, 3] /= 1000.0
+        palm = np.asarray(result, dtype=float)
+        palm[:3, 3] /= 1000.0
 
         # Existing M6 zsp_type=1 uses the negative upper-arm direction.
         q1, q2 = np.deg2rad(joints[:2])
@@ -54,7 +72,7 @@ def home_reference(context):
             np.sin(q2) * np.sin(q1),
             -np.cos(q2),
         ]).tolist()
-        reference["home_tcp"][side] = tcp.tolist()
+        reference["home_palm"][side] = palm.tolist()
         reference["upper_arm_directions"][side] = direction
     return reference
 
@@ -110,14 +128,8 @@ def fit_calibration(context, samples):
             OpenVRTrackerWrapper, f"_{side.upper()}_HAND_BACK_CORRECTION"
         )[:3, :3]
         base = _base_rotation(chest_settings[side])
-        home = np.asarray(reference["home_tcp"][side])
+        home = np.asarray(reference["home_palm"][side])
         home_upper = np.asarray(reference["upper_arm_directions"][side])
-        # The human hand-back point is the raw Tracker origin.
-        world_point = raw_hand_back[:, :3, 3]
-        chest_point = np.einsum(
-            "nij,nj->ni", chest_inverse_rotation, world_point - chest[:, :3, 3]
-        )
-        base_point = (chest_point - shared) @ base
         hand_back_rotation = base.T @ chest_inverse_rotation @ raw_hand_back[:, :3, :3]
         upper_rotation = base.T @ chest_inverse_rotation @ raw_upper[:, :3, :3]
 
@@ -125,36 +137,54 @@ def fit_calibration(context, samples):
             "nominal": nominal,
             "home": home,
             "home_upper": home_upper,
-            "base_point": base_point,
+            "base": base,
+            "raw_hand_back": raw_hand_back,
             "hand_back_rotation": hand_back_rotation,
             "upper_rotation": upper_rotation,
-            "local_candidates": base_point - home[:3, 3],
-            "tcp_candidates": hand_back_rotation.transpose(0, 2, 1) @ home[:3, :3],
+            "palm_candidates": hand_back_rotation.transpose(0, 2, 1) @ home[:3, :3],
             "upper_candidates": upper_rotation.transpose(0, 2, 1) @ home_upper,
         }
 
     left, right = data["left"], data["right"]
-    local_left = np.concatenate(
-        [left["local_candidates"], right["local_candidates"] @ ARM_MIRROR]
-    ).mean(axis=0)
     raw_to_target_left = Rotation.from_matrix(np.concatenate([
-        left["tcp_candidates"],
-        TRACKER_MIRROR @ right["tcp_candidates"] @ ARM_MIRROR,
+        left["palm_candidates"],
+        TRACKER_MIRROR @ right["palm_candidates"] @ ARM_MIRROR,
     ])).mean().as_matrix()
     upper_direction_left = np.concatenate(
         [left["upper_candidates"], right["upper_candidates"] @ TRACKER_MIRROR]
     ).mean(axis=0)
     upper_left = _rotation_from_y(upper_direction_left)
 
-    local = {"left": local_left, "right": ARM_MIRROR @ local_left}
     raw_to_target = {
         "left": raw_to_target_left,
         "right": TRACKER_MIRROR @ raw_to_target_left @ ARM_MIRROR,
     }
     upper = {"left": upper_left, "right": TRACKER_MIRROR @ upper_left @ TRACKER_MIRROR}
+
+    # Fit orientation first: the measured palm -> Tracker vector is expressed
+    # in those aligned palm axes, rather than in the raw Tracker axes.
+    for side in SIDES:
+        current = data[side]
+        raw_hand_back = current["raw_hand_back"]
+        offset = np.asarray(profile["hand_back_to_palm"][side]["tracker_offset_m"])
+        world_palm = raw_hand_back[:, :3, 3] - (
+            raw_hand_back[:, :3, :3] @ raw_to_target[side] @ offset
+        )
+        chest_palm = np.einsum(
+            "nij,nj->ni", chest_inverse_rotation, world_palm - chest[:, :3, 3]
+        )
+        current["base_point"] = (chest_palm - shared) @ current["base"]
+        current["local_candidates"] = current["base_point"] - current["home"][:3, 3]
+    local_left = np.concatenate(
+        [left["local_candidates"], right["local_candidates"] @ ARM_MIRROR]
+    ).mean(axis=0)
+    local = {"left": local_left, "right": ARM_MIRROR @ local_left}
+
     calibration = {
         "chest_mount": deepcopy(chest_settings),
-        "hand_back_to_tcp": {side: {} for side in SIDES},
+        # A single Home pose cannot determine this measured offset independently
+        # of chest placement. Preserve it and fit only the alignment quaternion.
+        "hand_back_to_palm": deepcopy(profile["hand_back_to_palm"]),
         "upper_arm_rotations": deepcopy(profile["upper_arm_rotations"]),
     }
     fit = {}
@@ -163,20 +193,20 @@ def fit_calibration(context, samples):
         current = data[side]
         for axis, value in zip(("x", "y", "z"), local[side]):
             calibration["chest_mount"][side][f"local_{axis}"] = float(value)
-        # Runtime applies nominal hand-back correction before this rotation-only TF.
+        # Runtime applies nominal hand-back correction before the palm transform.
         quaternion = Rotation.from_matrix(
             current["nominal"].T @ raw_to_target[side]
         ).as_quat()
         if quaternion[3] < 0:
             quaternion = -quaternion
         for key, value in zip(("qx", "qy", "qz", "qw"), quaternion):
-            calibration["hand_back_to_tcp"][side][key] = float(value)
+            calibration["hand_back_to_palm"][side][key] = float(value)
         calibration["upper_arm_rotations"][f"{side}_arm"] = upper[side].tolist()
 
         position_error = np.linalg.norm(
             current["base_point"] - local[side] - current["home"][:3, 3], axis=1
         )
-        tcp_angle = np.rad2deg(Rotation.from_matrix(
+        palm_angle = np.rad2deg(Rotation.from_matrix(
             current["home"][:3, :3].T @ current["hand_back_rotation"] @ raw_to_target[side]
         ).magnitude())
         upper_direction = current["upper_rotation"] @ upper[side][:, 1]
@@ -186,7 +216,7 @@ def fit_calibration(context, samples):
         upper_angle = np.rad2deg(np.arccos(np.clip(cosine, -1.0, 1.0)))
         fit[side] = {
             "mean_position_error_mm": float(position_error.mean() * 1000.0),
-            "mean_tcp_angle_deg": float(tcp_angle.mean()),
+            "mean_palm_angle_deg": float(palm_angle.mean()),
             "mean_upper_direction_angle_deg": float(upper_angle.mean()),
         }
 

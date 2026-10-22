@@ -1,4 +1,4 @@
-"""Tracker TF to arm joint targets; hardware execution belongs to tianji_output."""
+"""Robot TCP targets to arm joints; hardware execution belongs to tianji_output."""
 from __future__ import annotations
 
 import argparse
@@ -7,15 +7,13 @@ import time
 from typing import Optional
 
 import numpy as np
-import rclpy
 from rclpy.node import Node
 from rclpy.qos import (
     QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy,
 )
 from rclpy.utilities import remove_ros_args
-from tf2_ros import Buffer, TransformListener
-import tf2_ros
 from scipy.spatial.transform import Rotation as R
+from geometry_msgs.msg import PoseStamped, Vector3Stamped
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray, Int8
 from std_srvs.srv import SetBool
@@ -29,7 +27,7 @@ LIFECYCLE_READY = 2
 
 
 class TianjiArmControllerNode(Node):
-    """Convert calibrated Tracker transforms to named arm joint commands."""
+    """Convert robot-base TCP poses and upper-arm references to joint commands."""
 
     def __init__(self, *, config=None):
         super().__init__("tianji_arm_controller")
@@ -57,12 +55,16 @@ class TianjiArmControllerNode(Node):
         self.left_y_axis = None
         self.right_y_axis = None
 
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
         qos = get_default_qos()
         self.command_pub = self.create_publisher(
             JointState, '/tianji_arm/joint_commands', qos)
         for side in ('left', 'right'):
+            self.create_subscription(
+                PoseStamped, f'/{side}_arm/tcp_target',
+                lambda message, s=side: self._on_tcp_target(s, message), qos)
+            self.create_subscription(
+                Vector3Stamped, f'/{side}_arm/upper_arm_reference',
+                lambda message, s=side: self._on_upper_arm_reference(s, message), qos)
             self.create_subscription(
                 JointState, f'/{side}_arm/joint_states',
                 lambda message, s=side: self._on_joint_state(s, message), qos)
@@ -83,7 +85,28 @@ class TianjiArmControllerNode(Node):
         self._enable_client = self.create_client(SetBool, '/tianji_arm/set_enabled')
         self.create_timer(1.0 / self._control_rate_hz, self._control_loop)
         self.get_logger().info(
-            f"Arm retargeting ready: control_rate={self._control_rate_hz:.1f}Hz")
+            f"Arm IK ready: control_rate={self._control_rate_hz:.1f}Hz")
+
+    def _on_tcp_target(self, side: str, message: PoseStamped):
+        """Accept a palm TCP pose in {side}_base (metres, quaternion xyzw)."""
+        if not self._arm_enabled:
+            return
+        pose = message.pose
+        matrix = np.eye(4, dtype=np.float32)
+        matrix[:3, 3] = [pose.position.x, pose.position.y, pose.position.z]
+        matrix[:3, :3] = R.from_quat([
+            pose.orientation.x, pose.orientation.y,
+            pose.orientation.z, pose.orientation.w,
+        ]).as_matrix()
+        setattr(self, f'{side}_pose', self._matrix_to_pose(matrix))
+
+    def _on_upper_arm_reference(self, side: str, message: Vector3Stamped):
+        """Retain the existing upper-arm Y-axis zero-space convention."""
+        if not self._arm_enabled:
+            return
+        axis = np.array([message.vector.x, message.vector.y, message.vector.z])
+        setattr(self, f'{side}_y_axis', axis)
+        setattr(self.kinematics, f'{side}_zsp_para', [*axis, 0, 0, 0])
 
     def _on_joint_state(self, side: str, message: JointState):
         # The ROS interface is radians; the existing IK model takes degrees.
@@ -127,16 +150,6 @@ class TianjiArmControllerNode(Node):
         self._teleop_control()
 
     def _teleop_control(self):
-        for side in ('left', 'right'):
-            tcp = self._lookup_transform(f'{side}_chest', f'{side}_tcp_target')
-            if tcp is not None:
-                setattr(self, f'{side}_pose', self._matrix_to_pose(tcp))
-            upper_arm = self._lookup_transform(f'{side}_chest', f'{side}_arm')
-            if upper_arm is not None:
-                axis = upper_arm[:3, 1]
-                setattr(self, f'{side}_y_axis', axis)
-                setattr(self.kinematics, f'{side}_zsp_para', [*axis, 0, 0, 0])
-
         if self.left_pose is not None or self.right_pose is not None:
             blend_s = self._handoff_blend_factor()
             try:
@@ -186,7 +199,7 @@ class TianjiArmControllerNode(Node):
     def _blend_joints(start: Optional[list], target: Optional[list],
                       s: float) -> Optional[list]:
         """Return start*(1-s) + target*s; preserve target if start is missing,
-        and preserve start if target is missing (lets a per-side TF dropout
+        and preserve start if target is missing (lets a per-side target dropout
         still hold its snapshot instead of going None)."""
         if target is None and start is None:
             return None
@@ -217,25 +230,6 @@ class TianjiArmControllerNode(Node):
             if pose is not None:
                 getattr(self, f'{side}_ee_pose_pub').publish(
                     Float64MultiArray(data=[float(value) for value in pose]))
-
-    # -------------------- TF utilities --------------------
-
-    def _lookup_transform(self, from_frame: str, to_frame: str) -> Optional[np.ndarray]:
-        try:
-            tf = self.tf_buffer.lookup_transform(from_frame, to_frame, rclpy.time.Time())
-            return self._transform_to_matrix(tf)
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException):
-            return None
-
-    @staticmethod
-    def _transform_to_matrix(transform) -> np.ndarray:
-        t = transform.transform
-        quat = [t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w]
-        T = np.eye(4, dtype=np.float32)
-        T[:3, :3] = R.from_quat(quat).as_matrix()
-        T[:3, 3] = [t.translation.x, t.translation.y, t.translation.z]
-        return T
 
     @staticmethod
     def _matrix_to_pose(matrix: np.ndarray) -> np.ndarray:

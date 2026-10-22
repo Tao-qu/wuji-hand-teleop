@@ -8,17 +8,17 @@ right_arm:
 driver:
   robot_ip: "6.6.7.190"
   kinematics_model: "ccs_m6.MvKDCfg"
-  # Flange -> virtual hand-back TCP, mm; TCP axes parallel to flange axes.
-  # Approximate mounting: +Z toward fingers; dorsal -Y left, +Y right.
+  # Flange -> robot palm TCP, mm; TCP axes parallel to flange axes.
+  # +Z points toward the fingers. Human Tracker offsets belong to tracker.yaml.
   tool_transforms:
     left:
       - [1, 0, 0, 0]
-      - [0, 1, 0, -50]
+      - [0, 1, 0, 0]
       - [0, 0, 1, 70]
       - [0, 0, 0, 1]
     right:
       - [1, 0, 0, 0]
-      - [0, 1, 0, 50]
+      - [0, 1, 0, 0]
       - [0, 0, 1, 70]
       - [0, 0, 0, 1]
   tool_dynamics:

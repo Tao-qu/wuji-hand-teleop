@@ -1,6 +1,7 @@
 """Publish the fixed transforms from the selected Tracker calibration."""
 
 from launch_ros.actions import Node
+from openvr_input.tracker_calibration import hand_back_to_palm_transform
 
 
 def create_chest_tf_nodes(config: dict, sides: list = None) -> list:
@@ -56,28 +57,31 @@ def create_chest_tf_nodes(config: dict, sides: list = None) -> list:
     return nodes
 
 
-def create_tcp_target_tf_nodes(config: dict, sides: list = None) -> list:
-    """Align hand-back Tracker axes with the tool TCP, keeping its origin."""
+def create_human_palm_tf_nodes(config: dict, sides: list = None) -> list:
+    """Recover human palm frames using the measured Tracker mounting offset."""
     if sides is None:
         sides = ["left", "right"]
 
-    alignment = config["hand_back_to_tcp"]
+    alignment = config["hand_back_to_palm"]
     nodes = []
 
     for side in sides:
         t = alignment[side]
+        translation = hand_back_to_palm_transform(config, side)[:3, 3]
         nodes.append(Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            name=f"{side}_tcp_target_tf",
+            name=f"{side}_human_palm_tf",
             arguments=[
-                "--x", "0", "--y", "0", "--z", "0",
+                "--x", str(translation[0]),
+                "--y", str(translation[1]),
+                "--z", str(translation[2]),
                 "--qx", str(t["qx"]),
                 "--qy", str(t["qy"]),
                 "--qz", str(t["qz"]),
                 "--qw", str(t["qw"]),
                 "--frame-id", f"{side}_hand_back",
-                "--child-frame-id", f"{side}_tcp_target",
+                "--child-frame-id", f"{side}_human_palm",
             ],
         ))
 
