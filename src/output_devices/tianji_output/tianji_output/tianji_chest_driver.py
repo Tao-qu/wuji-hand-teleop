@@ -108,8 +108,8 @@ class TianjiChestDriver:
         """Return (left_torques, right_torques), each 7 joint torques in Nm."""
         dcss = DCSS()
         sub_data = self.robot.subscribe(dcss)
-        left_torque = sub_data["outputs"][0]["fb_joint_tor"]
-        right_torque = sub_data["outputs"][1]["fb_joint_tor"]
+        left_torque = sub_data["outputs"][0]["fb_joint_sToq"]
+        right_torque = sub_data["outputs"][1]["fb_joint_sToq"]
         return left_torque, right_torque
 
     def get_full_state(self):
@@ -120,12 +120,12 @@ class TianjiChestDriver:
             'left': {
                 'joints': sub_data["outputs"][0]["fb_joint_pos"],
                 'velocities': sub_data["outputs"][0]["fb_joint_vel"],
-                'torques': sub_data["outputs"][0]["fb_joint_tor"],
+                'torques': sub_data["outputs"][0]["fb_joint_sToq"],
             },
             'right': {
                 'joints': sub_data["outputs"][1]["fb_joint_pos"],
                 'velocities': sub_data["outputs"][1]["fb_joint_vel"],
-                'torques': sub_data["outputs"][1]["fb_joint_tor"],
+                'torques': sub_data["outputs"][1]["fb_joint_sToq"],
             }
         }
 
