@@ -1,0 +1,44 @@
+gmsl:
+  width: 2560
+  height: 1984
+  fps: 30
+  preview:
+    width: 640
+    fps: 10.0
+    jpeg_quality: 80
+  cameras:
+    head_left:
+      sensor_id: 0
+      frame_id: head_left_optical_frame
+      calibration_file: head_left.yaml
+    head_right:
+      sensor_id: 1
+      frame_id: head_right_optical_frame
+      calibration_file: head_right.yaml
+    left_wrist:
+      sensor_id: 4
+      frame_id: left_wrist_optical_frame
+      calibration_file: left_wrist.yaml
+    right_wrist:
+      sensor_id: 5
+      frame_id: right_wrist_optical_frame
+      calibration_file: right_wrist.yaml
+
+d435:
+  serial_no: '348122072721'
+  camera_name: d435
+  enable_color: true
+  enable_depth: true
+  enable_infra1: false
+  enable_infra2: false
+  enable_sync: false
+  rgb_camera.color_profile: '1280,720,30'
+  depth_module.depth_profile: '1280,720,30'
+  rgb_camera.color_format: RGB8
+  depth_module.depth_format: Z16
+  color_qos: SENSOR_DATA
+  depth_qos: SENSOR_DATA
+  align_depth.enable: false
+  pointcloud.enable: false
+  publish_tf: true
+  tf_publish_rate: 0.0
