@@ -15,12 +15,13 @@ try:
     from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
     from geometry_msgs.msg import TransformStamped
-    from tf2_ros import TransformBroadcaster
+    from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
     from rclpy.utilities import remove_ros_args
 except ImportError as exc:
     raise ImportError("This module requires ROS 2 Python packages.") from exc
 
 from .openvr_tracker_wrapper import OpenVRTrackerWrapper
+from .tracker_calibration import hand_back_to_palm_transform
 
 
 @dataclass
@@ -34,8 +35,8 @@ class OpenVRInputConfig:
     # e.g., {'chest': 'LHR-xxx', 'right_hand_back': 'LHR-yyy',
     #        'left_hand_back': 'LHR-zzz'}
 
-    # Tracker-local rotations for the calibrated upper-arm frames.
-    upper_arm_rotations: Optional[Dict[str, list]] = None
+    # Selected anatomical calibration, shared by chest and palm transforms.
+    profile: Optional[dict] = None
 
     # Publishing settings
     publish_rate_hz: float = 120.0
@@ -46,14 +47,13 @@ class OpenVRInputConfig:
 
     @classmethod
     def from_file(cls, path: str | Path | None = None) -> "OpenVRInputConfig":
-        """Read input settings and the selected profile from the arm config."""
-        from tianji_output.configuration import arm_config_path, load_arm_config
+        """Read the OpenVR input settings and selected anatomical calibration."""
+        from .configuration import input_config_path, load_input_config
         from .tracker_calibration_io import load_selected_profile
 
-        cfg_path = arm_config_path(path or None)
-        arm_config = load_arm_config(cfg_path)
-        profile = load_selected_profile(arm_config)
-        settings = arm_config["openvr"]
+        cfg_path = input_config_path(path or None)
+        settings = load_input_config(cfg_path)
+        profile = load_selected_profile(settings)
         data = {
             key: settings[key]
             for key in ("tracker_serials", "publish_rate_hz", "publish_tf", "parent_frame")
@@ -61,7 +61,7 @@ class OpenVRInputConfig:
         }
         return cls(
             config_path=str(cfg_path),
-            upper_arm_rotations=profile["upper_arm_rotations"],
+            profile=profile,
             **data,
         )
 
@@ -75,23 +75,34 @@ class OpenVRInputNode(Node):
 
         if not self.config.tracker_serials:
             raise ValueError(
-                "openvr.tracker_serials must be specified in the arm configuration."
+                "tracker_serials must be specified in the OpenVR input configuration."
             )
 
         self.get_logger().info(
             f"[OpenVR Input] Initializing with trackers: {list(self.config.tracker_serials.keys())}"
         )
         # Initialize OpenVR tracker wrapper
-        self.tracker_wrapper = OpenVRTrackerWrapper(
-            self.config.tracker_serials,
-            upper_arm_rotations=self.config.upper_arm_rotations,
-        )
+        self.tracker_wrapper = OpenVRTrackerWrapper(self.config.tracker_serials)
+        self._chest_correction = np.eye(4)
+        self._chest_correction[:3, :3] = self.config.profile["chest_rotation"]
 
         # Create TF broadcaster
         if self.config.publish_tf:
             self.tf_broadcaster = TransformBroadcaster(self)
+            self.static_tf_broadcaster = StaticTransformBroadcaster(self)
+            stamp = self.get_clock().now().to_msg()
+            self.static_tf_broadcaster.sendTransform([
+                self._make_transform(
+                    hand_back_to_palm_transform(self.config.profile, side),
+                    f"{side}_hand_back",
+                    f"{side}_human_palm",
+                    stamp,
+                )
+                for side in ("left", "right")
+            ])
         else:
             self.tf_broadcaster = None
+            self.static_tf_broadcaster = None
 
         # Create timer for periodic publishing
         self.timer = self.create_timer(
@@ -102,7 +113,10 @@ class OpenVRInputNode(Node):
         self.get_logger().info(
             f"[OpenVR Input] Publishing TF at {self.config.publish_rate_hz:.1f} Hz"
         )
-        self.get_logger().info("[OpenVR Input] Publishing TF: chest, right_hand_back, left_hand_back, left_arm, right_arm")
+        self.get_logger().info(
+            "[OpenVR Input] Publishing TF: chest, right_hand_back, left_hand_back, "
+            "left_arm, right_arm, left_human_palm, right_human_palm"
+        )
 
     def _publish_callback(self) -> None:
         """Timer callback to fetch and publish tracker data as TF."""
@@ -122,7 +136,7 @@ class OpenVRInputNode(Node):
         if chest_pose is not None:
             # Publish chest TF
             self._broadcast_tf(
-                chest_pose,
+                chest_pose @ self._chest_correction,
                 self.config.parent_frame,
                 "chest",
                 current_time
@@ -176,6 +190,18 @@ class OpenVRInputNode(Node):
         stamp
     ) -> None:
         """Broadcast a 4x4 matrix as a TF transform."""
+        self.tf_broadcaster.sendTransform(
+            self._make_transform(matrix, parent_frame, child_frame, stamp)
+        )
+
+    def _make_transform(
+        self,
+        matrix: np.ndarray,
+        parent_frame: str,
+        child_frame: str,
+        stamp,
+    ) -> TransformStamped:
+        """Convert a 4x4 matrix to a stamped TF transform."""
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = parent_frame
@@ -194,7 +220,7 @@ class OpenVRInputNode(Node):
         t.transform.rotation.z = float(quat[2])
         t.transform.rotation.w = float(quat[3])
 
-        self.tf_broadcaster.sendTransform(t)
+        return t
 
     @staticmethod
     def _rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
@@ -245,7 +271,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "-c",
         "--config",
         default=None,
-        help="Path to the arm YAML configuration (default: tianji_chest.yaml).",
+        help="Path to the OpenVR input YAML configuration (default: openvr.yaml).",
     )
     return parser.parse_args(argv)
 

@@ -1,15 +1,22 @@
-# Home joint angles: degrees.
+# Home joints: degrees. base_from_body maps robot-body X forward/Y left/Z up to each arm base.
+# Tool transforms: flange -> robot palm, translation in millimetres.
+# Tool dynamics: kg, COM mm, inertia about flange origin kg*m^2.
 left_arm:
   home_joints: [55.0, -65.0, -70.0, -60.0, 60.0, 0.0, 0.0]
-
+  base_from_body:
+    - [1.0, 0.0, 0.0]
+    - [0.0, 0.0, -1.0]
+    - [0.0, 1.0, 0.0]
 right_arm:
   home_joints: [-55.0, -65.0, 70.0, -60.0, -60.0, 0.0, 0.0]
-
+  base_from_body:
+    - [1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0]
+    - [0.0, -1.0, 0.0]
 driver:
-  robot_ip: "6.6.7.190"
-  kinematics_model: "ccs_m6.MvKDCfg"
-  # Flange -> robot palm TCP, mm; TCP axes parallel to flange axes.
-  # +Z points toward the fingers. Human Tracker offsets belong to tracker.yaml.
+  robot_ip: 6.6.7.190
+  kinematics_model: ccs_m6.MvKDCfg
+  # TCP axes stay parallel to flange axes; +Z points toward the fingers.
   tool_transforms:
     left:
       - [1, 0, 0, 0]
@@ -23,27 +30,13 @@ driver:
       - [0, 0, 0, 1]
   tool_dynamics:
     source: configured
-    # Tianji flange frame: mass kg, COM mm, inertia about the flange origin kg*m^2.
-    # Mount/flange origins assumed coincident; mount -> flange rotation: Rx(pi).
+    # Mount/flange origins coincide; mount -> flange rotation: Rx(pi).
     # Order: mass, com_x, com_y, com_z, Ixx, Ixy, Ixz, Iyy, Iyz, Izz.
-    left:  [0.688, 6.8, -1.8, 91.8, 0.00754, -0.00009, -0.00030, 0.00822, 0.00024, 0.00083]
+    left: [0.688, 6.8, -1.8, 91.8, 0.00754, -0.00009, -0.00030, 0.00822, 0.00024, 0.00083]
     right: [0.688, 6.8, 1.8, 91.8, 0.00754, 0.00009, -0.00030, 0.00822, -0.00024, 0.00083]
-
 controller:
   control_rate: 120.0
   state_publish_rate: 500.0
   home_duration_sec: 8.0
   handoff_hold_sec: 0.5
   handoff_ramp_sec: 1.0
-
-openvr:
-  calibration_file: "tracker.yaml"
-  tracker_serials:
-    chest: "LHR-8304D4CF"
-    left_hand_back: "LHR-9BFC64E3"
-    right_hand_back: "LHR-BC4F0E1C"
-    left_arm: "LHR-1ACBC7E2"
-    right_arm: "LHR-55DCF12E"
-  publish_rate_hz: 120.0
-  publish_tf: true
-  parent_frame: "world"

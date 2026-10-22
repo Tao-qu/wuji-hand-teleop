@@ -14,6 +14,7 @@ setup(
     install_requires=[
         'setuptools',
         'numpy>=1.24.0',
+        'scipy',
     ],
     zip_safe=True,
     maintainer='Wuji Robotics',

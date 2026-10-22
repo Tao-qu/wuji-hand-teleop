@@ -14,10 +14,10 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('openvr_input')
 
     # Declare launch arguments
-    arm_config_arg = DeclareLaunchArgument(
-        'arm_config',
+    input_config_arg = DeclareLaunchArgument(
+        'input_config',
         default_value='',
-        description='Optional arm configuration YAML (default: tianji_chest.yaml)'
+        description='Optional OpenVR input configuration YAML (default: openvr.yaml)'
     )
 
     rviz_arg = DeclareLaunchArgument(
@@ -32,7 +32,7 @@ def generate_launch_description():
         executable='openvr_input',
         name='openvr_input',
         output='screen',
-        arguments=['-c', LaunchConfiguration('arm_config')],
+        arguments=['-c', LaunchConfiguration('input_config')],
     )
 
     # RViz node
@@ -45,7 +45,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        arm_config_arg,
+        input_config_arg,
         rviz_arg,
         openvr_input_node,
         rviz_node,

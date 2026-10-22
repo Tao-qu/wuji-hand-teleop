@@ -47,13 +47,11 @@ Visualization Manager:
       All Enabled: true
       chest:
         Value: true
-      left_chest:
+      left_arm:
         Value: true
       left_hand_back:
         Value: true
       right_arm:
-        Value: true
-      right_chest:
         Value: true
       right_hand_back:
         Value: true
@@ -70,10 +68,13 @@ Visualization Manager:
     Show Names: true
     Tree:
       world:
-        chest:
-          left_chest: {}
-          right_chest: {}
+        chest: {}
+        left_arm: {}
+        left_hand_back:
+          left_human_palm: {}
         right_arm: {}
+        right_hand_back:
+          right_human_palm: {}
     Update Interval: 0
     Value: true
   - Class: rviz_default_plugins/Axes
@@ -100,14 +101,14 @@ Visualization Manager:
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.30000001192092896
-    Name: Right TCP Target
+    Name: Right Human Palm
     Radius: 0.02500000037252903
     Reference Frame: right_human_palm
     Value: true
   - Class: rviz_default_plugins/Axes
     Enabled: true
     Length: 0.30000001192092896
-    Name: Left TCP Target
+    Name: Left Human Palm
     Radius: 0.02500000037252903
     Reference Frame: left_human_palm
     Value: true

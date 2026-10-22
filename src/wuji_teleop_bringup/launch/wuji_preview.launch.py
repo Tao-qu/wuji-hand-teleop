@@ -10,7 +10,7 @@ from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from tianji_output.configuration import arm_config_path
+from openvr_input.configuration import input_config_path
 from wuji_teleop_bringup.launch_utils import resolve_config_path
 
 
@@ -20,11 +20,11 @@ TF_REMAPS = [("/tf", "/preview/tf"), ("/tf_static", "/preview/tf_static")]
 def _nodes(context):
     enabled = lambda name: LaunchConfiguration(name).perform(context).lower() == "true"
     nodes = []
+    with open(resolve_config_path("wujihand2_ros2", "wujihand2.yaml")) as stream:
+        hand_config = yaml.safe_load(stream)
     if enabled("start_inputs"):
-        with open(resolve_config_path("wujihand2_ros2", "wujihand2.yaml")) as stream:
-            hand_config = yaml.safe_load(stream)
         profiles = hand_config.get("manus", {})
-        config_path = arm_config_path(LaunchConfiguration("arm_config").perform(context))
+        config_path = input_config_path(LaunchConfiguration("input_config").perform(context))
         nodes += [
             Node(package="manus_ros2", executable="manus_data_publisher", name="preview_manus",
                  output="log", parameters=[profiles],
@@ -33,7 +33,8 @@ def _nodes(context):
             Node(package="openvr_input", executable="openvr_input", name="preview_openvr",
                  output="screen", arguments=["-c", str(config_path)], remappings=TF_REMAPS),
         ]
-    preview = Node(package="wuji_teleop_bringup", executable="wujihand2_preview", output="screen")
+    preview = Node(package="wuji_teleop_bringup", executable="wujihand2_preview", output="screen",
+                   parameters=[{"flip_y": bool(hand_config.get("controller", {}).get("flip_y", False))}])
     nodes.append(preview)
     model = Path(get_package_share_directory("wuji_hand2_2_description")) / "urdf"
     for side, x in (("left", -0.18), ("right", 0.18)):
@@ -67,6 +68,6 @@ def generate_launch_description():
         DeclareLaunchArgument("start_inputs", default_value="true", choices=["true", "false"],
                               description="Start input readers; false permits a no-hardware graph check"),
         DeclareLaunchArgument("enable_rviz", default_value="true", choices=["true", "false"]),
-        DeclareLaunchArgument("arm_config", default_value="", description="Arm YAML selecting Tracker input and calibration"),
+        DeclareLaunchArgument("input_config", default_value="", description="OpenVR input configuration YAML"),
         OpaqueFunction(function=_nodes),
     ])

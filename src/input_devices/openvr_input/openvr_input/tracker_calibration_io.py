@@ -10,9 +10,8 @@ from ruamel.yaml.comments import CommentedSeq
 
 
 SIDES = ("left", "right")
-CHEST_KEYS = ("roll", "pitch", "yaw", "local_x", "local_y", "local_z")
 QUATERNION_KEYS = ("qx", "qy", "qz", "qw")
-PROFILE_KEYS = ("chest_mount", "hand_back_to_palm", "upper_arm_rotations")
+PROFILE_KEYS = ("chest_rotation", "hand_back_to_palm", "neutral_pose")
 
 
 def read_config(path):
@@ -36,9 +35,9 @@ def calibration_directory():
     return Path(get_package_share_directory("openvr_input")) / "calibration"
 
 
-def calibration_path(arm_config):
+def calibration_path(input_config):
     """Resolve a package calibration filename or an absolute profile path."""
-    path = Path(arm_config["openvr"]["calibration_file"]).expanduser()
+    path = Path(input_config["calibration_file"]).expanduser()
     if not path.is_absolute():
         if path.parent != Path(".") or not path.name:
             raise ValueError("calibration_file must be a filename or an absolute path")
@@ -59,9 +58,9 @@ def calibration_output_path(filename):
     return calibration_directory() / filename
 
 
-def load_selected_profile(arm_config):
-    """Read the calibration selected by the arm configuration."""
-    return read_config(calibration_path(arm_config))
+def load_selected_profile(input_config):
+    """Read the calibration selected by the input configuration."""
+    return read_config(calibration_path(input_config))
 
 
 def load_output_profile(output):
@@ -71,13 +70,10 @@ def load_output_profile(output):
     return read_config(source)
 
 
-def load_context(arm_config, output):
-    from tianji_output.configuration import kinematics_path
-
+def load_context(input_config, output):
     return {
-        "arm_config": arm_config,
+        "input_config": input_config,
         "profile": load_output_profile(output),
-        "kinematics_path": str(kinematics_path(arm_config)),
     }
 
 
@@ -88,46 +84,58 @@ def _number(value, name):
         raise ValueError(f"{name} must be finite")
 
 
+def _vector(value, length, name):
+    if not isinstance(value, (list, tuple)) or len(value) != length:
+        raise ValueError(f"{name} must contain {length} coordinates")
+    for coordinate in value:
+        _number(coordinate, name)
+
+
+def _quaternion(value, name):
+    _vector(value, 4, name)
+    norm = sum(coordinate ** 2 for coordinate in value)
+    if not math.isclose(norm, 1.0, rel_tol=1e-6, abs_tol=1e-6):
+        raise ValueError(f"{name} must have unit length")
+
+
+def _rotation_matrix(matrix, name):
+    if len(matrix) != 3 or any(len(row) != 3 for row in matrix):
+        raise ValueError(f"{name} must be 3x3")
+    for row in matrix:
+        for value in row:
+            _number(value, name)
+    for i in range(3):
+        for j in range(3):
+            dot = sum(matrix[k][i] * matrix[k][j] for k in range(3))
+            if not math.isclose(dot, float(i == j), abs_tol=1e-6):
+                raise ValueError(f"{name} must be orthogonal")
+    a, b, c = matrix
+    determinant = (a[0] * (b[1] * c[2] - b[2] * c[1])
+                   - a[1] * (b[0] * c[2] - b[2] * c[0])
+                   + a[2] * (b[0] * c[1] - b[1] * c[0]))
+    if not math.isclose(determinant, 1.0, abs_tol=1e-6):
+        raise ValueError(f"{name} must have determinant +1")
+
+
 def validate_profile(profile):
     """Check generated calibration fields before export."""
     if not isinstance(profile, dict):
         raise ValueError("Expected a Tracker calibration mapping")
     try:
-        chest = profile["chest_mount"]
+        _rotation_matrix(profile["chest_rotation"], "chest_rotation")
         hand_back_to_palm = profile["hand_back_to_palm"]
-        upper = profile["upper_arm_rotations"]
-        for axis in ("x", "y", "z"):
-            _number(chest["shared"][axis], f"chest_mount.shared.{axis}")
+        neutral_pose = profile["neutral_pose"]
         for side in SIDES:
-            for key in CHEST_KEYS:
-                _number(chest[side][key], f"chest_mount.{side}.{key}")
-            for key in QUATERNION_KEYS:
-                _number(hand_back_to_palm[side][key], f"hand_back_to_palm.{side}.{key}")
-            norm = sum(hand_back_to_palm[side][key] ** 2 for key in QUATERNION_KEYS)
-            if not math.isclose(norm, 1.0, rel_tol=1e-6, abs_tol=1e-6):
-                raise ValueError(f"{side} hand-back-to-palm quaternion must have unit length")
-            offset = hand_back_to_palm[side]["tracker_offset_m"]
-            if not isinstance(offset, (list, tuple)) or len(offset) != 3:
-                raise ValueError(f"{side} tracker_offset_m must contain three coordinates")
-            for value in offset:
-                _number(value, f"hand_back_to_palm.{side}.tracker_offset_m")
-            matrix = upper[side + "_arm"]
-            if len(matrix) != 3 or any(len(row) != 3 for row in matrix):
-                raise ValueError(f"{side} upper-arm rotation must be 3x3")
-            for row in matrix:
-                for value in row:
-                    _number(value, f"upper_arm_rotations.{side}_arm")
-            for i in range(3):
-                for j in range(3):
-                    dot = sum(matrix[k][i] * matrix[k][j] for k in range(3))
-                    if not math.isclose(dot, float(i == j), abs_tol=1e-6):
-                        raise ValueError(f"{side} upper-arm rotation must be orthogonal")
-            a, b, c = matrix
-            determinant = (a[0] * (b[1] * c[2] - b[2] * c[1])
-                           - a[1] * (b[0] * c[2] - b[2] * c[0])
-                           + a[2] * (b[0] * c[1] - b[1] * c[0]))
-            if not math.isclose(determinant, 1.0, abs_tol=1e-6):
-                raise ValueError(f"{side} upper-arm rotation must have determinant +1")
+            _quaternion(
+                [hand_back_to_palm[side][key] for key in QUATERNION_KEYS],
+                f"hand_back_to_palm.{side}",
+            )
+            _vector(hand_back_to_palm[side]["tracker_offset_m"], 3,
+                    f"hand_back_to_palm.{side}.tracker_offset_m")
+            neutral = neutral_pose[side]
+            _vector(neutral["position_m"], 3, f"neutral_pose.{side}.position_m")
+            for key in ("quaternion_xyzw", "upper_arm_quaternion_xyzw"):
+                _quaternion(neutral[key], f"neutral_pose.{side}.{key}")
     except (KeyError, TypeError) as exc:
         raise ValueError(f"Incomplete Tracker calibration: {exc}") from exc
     return profile

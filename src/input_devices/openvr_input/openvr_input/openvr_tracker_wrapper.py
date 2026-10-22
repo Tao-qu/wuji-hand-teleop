@@ -3,7 +3,7 @@
 This module provides a wrapper around OpenVR to:
 1. Connect to OpenVR system
 2. Detect trackers by serial number
-3. Get pose data with coordinate frame corrections
+3. Get raw pose data in the OpenVR world frame
 """
 
 from typing import Dict, Optional
@@ -34,19 +34,17 @@ def pose_matrix_to_numpy(pose_matrix) -> np.ndarray:
 
 
 class OpenVRTrackerWrapper:
-    """Wrapper for OpenVR Tracker data acquisition and coordinate correction.
+    """Wrapper for raw OpenVR Tracker data acquisition.
 
     This class handles:
     - OpenVR system initialization
     - Tracker detection by serial number
-    - Pose acquisition with coordinate frame corrections
+    - Raw pose acquisition without role-specific frame corrections
 
     Args:
         tracker_serials: Dictionary mapping roles to tracker serial numbers
                         e.g., {'chest': 'LHR-xxx', 'right_hand_back': 'LHR-yyy',
                                'left_hand_back': 'LHR-zzz'}
-        upper_arm_rotations: Optional left_arm/right_arm 3x3 rotations. Columns
-                             are calibrated-frame axes in the raw tracker frame.
 
     Example:
         >>> wrapper = OpenVRTrackerWrapper({
@@ -58,42 +56,9 @@ class OpenVRTrackerWrapper:
         >>> print(poses['chest'].shape)  # (4, 4)
     """
 
-    # Pre-computed correction matrices:
-    # - Chest: Rx(90°, flip xz) @ Rz(180°)
-    # - Right hand back: Ry(90°) @ Rz(-90°) @ Ry(180°)
-    # - Left hand back: Ry(90°) @ Rz(90°) @ Ry(180°)
-    # These rotations preserve the raw Tracker origin.
-    _CHEST_CORRECTION = np.array([
-        [1, 0, 0, 0],
-        [0, 0, 1, 0],
-        [0, -1, 0, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float32)
-
-    _RIGHT_HAND_BACK_CORRECTION = np.array([
-        [0, 0, -1, 0],
-        [1, 0, 0, 0],
-        [0, -1, 0, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float32)
-
-    _LEFT_HAND_BACK_CORRECTION = np.array([
-        [0, 0, -1, 0],
-        [-1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float32)
-
-    def __init__(self, tracker_serials: Dict[str, str],
-                 upper_arm_rotations: Optional[Dict[str, list]] = None):
+    def __init__(self, tracker_serials: Dict[str, str]):
         ## YOU HAVE TO RUN STEAMVR FIRST
         self.tracker_serials = tracker_serials
-        self._upper_arm_corrections = {}
-        for role in ('left_arm', 'right_arm'):
-            correction = np.eye(4, dtype=np.float32)
-            correction[:3, :3] = np.asarray(
-                (upper_arm_rotations or {}).get(role, np.eye(3)), dtype=np.float32)
-            self._upper_arm_corrections[role] = correction
         self._vr_system: Optional[openvr.VRSystem] = None
         self._is_connected = False
         self._detected_trackers: Dict[int, str] = {}  # device_index -> role
@@ -183,14 +148,11 @@ class OpenVRTrackerWrapper:
             return None
 
     def get_poses(self) -> Dict[str, Optional[np.ndarray]]:
-        """Get corrected pose data for all detected trackers.
+        """Get raw pose data for all detected trackers.
 
         Returns:
-            dict: Dictionary containing corrected 4x4 transformation matrices:
-                - 'chest': chest tracker pose (corrected)
-                - 'right_hand_back': right hand-back Tracker origin (corrected axes)
-                - 'left_hand_back': left hand-back Tracker origin (corrected axes)
-                Values are None if tracker not detected or pose invalid.
+            dict: Detected role names mapped to raw 4x4 transformation matrices.
+                Values are None if a detected tracker's pose is invalid.
         """
         if not self._is_connected or self._vr_system is None:
             raise RuntimeError("OpenVR system is not connected")
@@ -199,25 +161,7 @@ class OpenVRTrackerWrapper:
 
         # Get raw poses for all detected trackers
         for device_index, role in self._detected_trackers.items():
-            raw_pose = self._get_tracker_pose(device_index)
-
-            if raw_pose is not None:
-                # Apply coordinate correction based on role
-                if role == 'chest':
-                    corrected_pose = raw_pose @ self._CHEST_CORRECTION
-                elif role == 'right_hand_back':
-                    corrected_pose = raw_pose @ self._RIGHT_HAND_BACK_CORRECTION
-                elif role == 'left_hand_back':
-                    corrected_pose = raw_pose @ self._LEFT_HAND_BACK_CORRECTION
-                elif role in ('left_arm', 'right_arm'):
-                    # Calibrated local Y supplies the upper-arm reference direction.
-                    corrected_pose = raw_pose @ self._upper_arm_corrections[role]
-                else:
-                    corrected_pose = raw_pose
-
-                poses[role] = corrected_pose
-            else:
-                poses[role] = None
+            poses[role] = self._get_tracker_pose(device_index)
 
         return poses
 

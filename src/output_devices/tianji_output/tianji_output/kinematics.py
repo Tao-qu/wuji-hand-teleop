@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 import time
 
+import numpy as np
+
 from ._internal.fx_kine import Marvin_Kine
 from .configuration import kinematics_path, load_arm_config
 from .tool_parameters import tool_transform
@@ -148,3 +150,33 @@ class TianjiKinematics:
 
         return left_success, right_success, left_joints, right_joints
 
+
+def home_upper_arm_direction(home_joints) -> np.ndarray:
+    """Return the M6 zsp_type=1 Home reference from joint angles in degrees."""
+    # The M6 solver uses the negative upper-arm direction for this reference.
+    q1, q2 = np.deg2rad(home_joints[:2])
+    return np.array([
+        np.sin(q2) * np.cos(q1),
+        np.sin(q2) * np.sin(q1),
+        -np.cos(q2),
+    ])
+
+
+def load_home_reference(config):
+    """Calculate Home TCP poses in metres using only the local robot model.
+
+    Calibration and retargeting share this reference; creating the local
+    kinematics model does not establish any hardware connection.
+    """
+    kinematics = TianjiKinematics(config=config)
+    reference = {"home_palm": {}, "upper_arm_directions": {}}
+    for side in ('left', 'right'):
+        joints = config[f'{side}_arm']['home_joints']
+        result = kinematics.forward(side, joints)
+        if result is False or result is None:
+            raise RuntimeError(f"Cannot calculate {side} Home FK")
+        palm = np.array(result, dtype=float, copy=True)
+        palm[:3, 3] /= 1000.0
+        reference['home_palm'][side] = palm
+        reference['upper_arm_directions'][side] = home_upper_arm_direction(joints)
+    return reference

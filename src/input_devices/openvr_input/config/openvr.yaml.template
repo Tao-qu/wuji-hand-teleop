@@ -1,0 +1,11 @@
+# OpenVR input settings; calibration is independent of robot geometry.
+calibration_file: tracker.yaml
+tracker_serials:
+  chest: LHR-8304D4CF
+  left_hand_back: LHR-9BFC64E3
+  right_hand_back: LHR-BC4F0E1C
+  left_arm: LHR-1ACBC7E2
+  right_arm: LHR-55DCF12E
+publish_rate_hz: 120.0
+publish_tf: true
+parent_frame: world

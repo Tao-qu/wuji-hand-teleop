@@ -9,10 +9,9 @@ from launch.actions import EmitEvent, OpaqueFunction, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch_ros.actions import Node
-from tianji_output.configuration import arm_config_path, load_arm_config
-from openvr_input.tracker_calibration_io import load_selected_profile
+from tianji_output.configuration import arm_config_path
+from openvr_input.configuration import input_config_path
 from wuji_teleop_bringup.launch_utils import resolve_config_path
-from wuji_teleop_bringup.tf_utils import create_chest_tf_nodes, create_human_palm_tf_nodes
 
 
 def _options(argv):
@@ -76,14 +75,12 @@ def _nodes(context):
         nodes.append(home)
     elif arm:
         arm_path = arm_config_path()
-        calibration = load_selected_profile(load_arm_config(arm_path))
+        input_path = input_config_path()
         nodes.append(Node(package="openvr_input", executable="openvr_input", output="screen",
-                          arguments=["-c", str(arm_path)]))
-        nodes.extend(create_chest_tf_nodes(calibration))
-        nodes.extend(create_human_palm_tf_nodes(calibration))
+                          arguments=["-c", str(input_path)]))
         nodes.append(Node(
             package="controller", executable="tracker_arm_retarget", output="screen",
-            arguments=["-c", str(arm_path)]))
+            arguments=["-c", str(arm_path), "--input-config", str(input_path)]))
         nodes.append(Node(
             package="controller", executable="tianji_arm_controller", output="screen",
             arguments=["-c", str(arm_path)]))

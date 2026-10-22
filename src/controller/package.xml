@@ -19,6 +19,7 @@
   <!-- Kinematics and hand retargeting dependencies -->
   <exec_depend>tianji_output</exec_depend>
   <exec_depend>wujihand2_ros2</exec_depend>
+  <exec_depend>openvr_input</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

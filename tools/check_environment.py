@@ -39,6 +39,7 @@ def check_configuration(mode):
         print(f"OK hand configuration {config_path.resolve()}")
     if mode != "hands":
         from tianji_output.configuration import arm_config_path, kinematics_path, load_arm_config
+        from openvr_input.configuration import input_config_path, load_input_config
         from openvr_input.tracker_calibration_io import calibration_path, load_selected_profile, validate_profile
 
         config = load_arm_config()
@@ -47,9 +48,11 @@ def check_configuration(mode):
                 raise ValueError(f"{side} arm Home must contain seven positions")
         if not kinematics_path(config).is_file():
             raise ValueError(f"Missing kinematics model: {kinematics_path(config)}")
-        validate_profile(load_selected_profile(config))
+        input_config = load_input_config()
+        validate_profile(load_selected_profile(input_config))
         print(f"OK arm configuration {arm_config_path()}")
-        print(f"OK Tracker calibration {calibration_path(config)}")
+        print(f"OK OpenVR configuration {input_config_path()}")
+        print(f"OK Tracker calibration {calibration_path(input_config)}")
 
 
 def main():

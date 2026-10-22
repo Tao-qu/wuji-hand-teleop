@@ -8,6 +8,7 @@ import shutil
 TELEOP_TEMPLATES = (
     "src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml.template",
     "src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml.template",
+    "src/input_devices/openvr_input/config/openvr.yaml.template",
     "src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal.template",
     "src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal.template",
     "src/input_devices/openvr_input/calibration/tracker.yaml.template",
