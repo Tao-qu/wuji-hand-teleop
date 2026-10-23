@@ -3,6 +3,7 @@
 #include <gst/video/video.h>
 #include <chrono>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -83,12 +84,28 @@ bool CaptureBackend::capture(Frame& frame) {
   if (clock && segment && segment->format == GST_FORMAT_TIME && GST_CLOCK_TIME_IS_VALID(pts)) {
     const GstClockTime running = gst_segment_to_running_time(segment, GST_FORMAT_TIME, pts);
     const GstClockTime base = gst_element_get_base_time(pipeline_);
-    const GstClockTime current = gst_clock_get_time(clock);
-    if (GST_CLOCK_TIME_IS_VALID(running) && GST_CLOCK_TIME_IS_VALID(base) &&
-        base + running <= current) {
-      // Map the pipeline PTS clock to Unix time. PTS is not a hardware exposure timestamp.
-      frame.stamp_ns -= static_cast<int64_t>(current - base - running);
-      frame.source_pts = true;
+    if (GST_CLOCK_TIME_IS_VALID(running) && GST_CLOCK_TIME_IS_VALID(base)) {
+      GstClockTime current = GST_CLOCK_TIME_NONE;
+      int64_t system_time = 0;
+      int64_t shortest_span = std::numeric_limits<int64_t>::max();
+      for (int attempt = 0; attempt < 3; ++attempt) {
+        const int64_t before = realtime_ns();
+        const GstClockTime sampled = gst_clock_get_time(clock);
+        const int64_t after = realtime_ns();
+        const int64_t span = after - before;
+        if (GST_CLOCK_TIME_IS_VALID(sampled) && span >= 0 && span < shortest_span) {
+          shortest_span = span;
+          current = sampled;
+          system_time = before + span / 2;
+        }
+      }
+      if (GST_CLOCK_TIME_IS_VALID(current) && base + running <= current) {
+        // Pair the clocks closely so scheduling before this read does not shift PTS.
+        // Refresh the mapping each frame to follow system clock synchronization.
+        // PTS is not a hardware exposure timestamp.
+        frame.stamp_ns = system_time - static_cast<int64_t>(current - base - running);
+        frame.source_pts = true;
+      }
     }
   }
   if (clock) gst_object_unref(clock);
