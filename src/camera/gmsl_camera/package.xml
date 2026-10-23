@@ -2,7 +2,7 @@
 <package format="3">
   <name>gmsl_camera</name>
   <version>0.1.0</version>
-  <description>Independent full-resolution Argus streams for the Tianji GMSL cameras.</description>
+  <description>Independent 640x480 Argus streams for the Tianji GMSL cameras.</description>
   <maintainer email="taoqu@users.noreply.github.com">Tao Qu</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>

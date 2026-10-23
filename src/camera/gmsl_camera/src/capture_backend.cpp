@@ -19,9 +19,12 @@ CaptureBackend::CaptureBackend(int sensor_id, int width, int height, int fps) {
   gst_init(nullptr, nullptr);
   const std::string description =
       "nvarguscamerasrc sensor-id=" + std::to_string(sensor_id) +
-      " sensor-mode=0 ! video/x-raw(memory:NVMM),format=NV12,width=" + std::to_string(width) +
-      ",height=" + std::to_string(height) + ",framerate=" + std::to_string(fps) +
-      "/1 ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! "
+      // Crop the sensor's 2560x1984 image to 4:3 before scaling in NVMM.
+      " sensor-mode=0 ! video/x-raw(memory:NVMM),format=NV12,width=2560,height=1984,framerate=" +
+      std::to_string(fps) +
+      "/1 ! nvvidconv left=0 right=2560 top=32 bottom=1952 interpolation-method=3 ! "
+      "video/x-raw,format=BGRx,width=" + std::to_string(width) +
+      ",height=" + std::to_string(height) + " ! videoconvert ! "
       "video/x-raw,format=RGB ! appsink name=frames max-buffers=2 drop=true sync=false";
   GError* error = nullptr;
   pipeline_ = gst_parse_launch(description.c_str(), &error);

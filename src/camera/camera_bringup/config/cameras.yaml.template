@@ -1,6 +1,6 @@
 gmsl:
-  width: 2560
-  height: 1984
+  width: 640
+  height: 480
   fps: 30
   preview:
     width: 640
@@ -32,8 +32,8 @@ d435:
   enable_infra1: false
   enable_infra2: false
   enable_sync: false
-  rgb_camera.color_profile: '1280,720,30'
-  depth_module.depth_profile: '1280,720,30'
+  rgb_camera.color_profile: '640,480,30'
+  depth_module.depth_profile: '640,480,30'
   rgb_camera.color_format: RGB8
   depth_module.depth_format: Z16
   color_qos: SENSOR_DATA

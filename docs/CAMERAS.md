@@ -13,27 +13,30 @@ Two processes run under `/cameras`:
 
 | Camera | Device | Image topic | Default |
 | --- | --- | --- | --- |
-| Head left | Argus sensor 0 | `/cameras/head_left/image_raw` | RGB8, 2560 x 1984, 30 fps requested |
-| Head right | Argus sensor 1 | `/cameras/head_right/image_raw` | RGB8, 2560 x 1984, 30 fps requested |
-| Left wrist | Argus sensor 4 | `/cameras/left_wrist/image_raw` | RGB8, 2560 x 1984, 30 fps requested |
-| Right wrist | Argus sensor 5 | `/cameras/right_wrist/image_raw` | RGB8, 2560 x 1984, 30 fps requested |
-| D435 color | Serial `348122072721` | `/cameras/d435/color/image_raw` | RGB8, 1280 x 720, 30 fps |
-| D435 depth | Same D435 | `/cameras/d435/depth/image_rect_raw` | 16UC1, 1280 x 720, 30 fps |
+| Head left | Argus sensor 0 | `/cameras/head_left/image_raw` | RGB8, 640 x 480, 30 fps requested |
+| Head right | Argus sensor 1 | `/cameras/head_right/image_raw` | RGB8, 640 x 480, 30 fps requested |
+| Left wrist | Argus sensor 4 | `/cameras/left_wrist/image_raw` | RGB8, 640 x 480, 30 fps requested |
+| Right wrist | Argus sensor 5 | `/cameras/right_wrist/image_raw` | RGB8, 640 x 480, 30 fps requested |
+| D435 color | Serial `348122072721` | `/cameras/d435/color/image_raw` | RGB8, 640 x 480, 30 fps requested |
+| D435 depth | Same D435 | `/cameras/d435/depth/image_rect_raw` | 16UC1, 640 x 480, 30 fps requested |
 
-Each stream has a corresponding `camera_info` topic. RealSense depth values are
-millimeters in the published ROS image. The GMSL images are full sensor-output
-resolution, with color conversion only: no rectification, resize, rotation, overlay,
-or stitching. The backend selects Argus sensor mode 0 for the supplied GEAC cameras.
-These are RGB images from the Argus NV12 stream, not Bayer RAW.
+Each stream has a corresponding `camera_info` topic. The GMSL backend captures
+Argus sensor mode 0 at 2560 x 1984 internally, removes 32 rows from both the top
+and bottom, and scales the resulting 2560 x 1920 image to 640 x 480 with Jetson
+hardware before converting to RGB and publishing to ROS. This preserves the
+4:3 aspect ratio. The four views remain separate, without stitching or overlays.
+The D435 supplies native 640 x 480 color and depth profiles. Its published depth
+is `uint16` in millimeters. Only the 640 x 480 images are published and recorded;
+no original-resolution image stream or file is produced.
 
 For each GMSL role, `/cameras/<role>/preview/compressed` publishes JPEG previews
-only while subscribed (default width 640, maximum 10 fps, quality 80). Preview
-resizing does not change the raw image. `/cameras/diagnostics` reports each GMSL
+only while subscribed (default width 640, maximum 10 fps, quality 80). Previews
+use the published 640 x 480 image. `/cameras/diagnostics` reports each GMSL
 channel's observed rate, frame count, timestamp source, and calibration status.
 
 The D435's optional aligned stream is
 `/cameras/d435/aligned_depth_to_color/image_raw`; enable `align_depth.enable` in the
-configuration to publish it alongside the original depth stream. D435 image
+configuration to publish it alongside the unaligned 640 x 480 depth stream. D435 image
 transport plugins expose compressed image topics when installed. The internal
 RealSense TF tree is provided by its official driver. No robot-to-camera mounting
 transform is invented for either camera family.
@@ -168,9 +171,10 @@ src/camera/camera_bringup/calibration/right_wrist.yaml
 ```
 
 Templates contain zero camera matrices: ROS `CameraInfo.k[0] == 0` means
-**uncalibrated**. Replace each local file with that camera's measured intrinsics at
-the configured resolution. Do not copy one camera's intrinsics to the other three.
-Raw images remain available without intrinsics. RealSense reads its own factory
+**uncalibrated**. Replace each local file with that camera's measured intrinsics for
+the published 640 x 480 view, including its crop and scale. Do not copy one camera's
+intrinsics to the other three.
+Images can be published without intrinsics. RealSense reads its own factory
 calibration. Local YAML files are ignored by Git; templates are committed.
 
 Launch loads the source configuration directory recorded during the build, so there
@@ -235,20 +239,20 @@ Independent workers publish frames as they arrive; the dataset writer aligns
 them by source timestamps on a 30 Hz grid. RealSense timestamp conversion remains
 owned by the official driver.
 
-The default GMSL raw payload alone is approximately 1.83 GB/s (14.6 Gbit/s), before
-D435 and DDS overhead. The current 1 Gbit/s Jetson link cannot carry it all. Keep
-full-resolution recording/processing on the Jetson, subscribe to JPEG previews
-from the desktop, and send only policy-sized images for inference. Actual capture
-and storage throughput must be selected for the intended recording mode. System
-clock synchronization does not remove transport delay or align exposures.
+At 30 fps, the five 640 x 480 RGB8 streams and one 640 x 480 16UC1 depth stream
+carry approximately 156.7 MB/s (1.25 Gbit/s) before DDS overhead. The current
+1 Gbit/s Jetson link cannot carry all six raw streams. Keep recording on the
+Jetson and subscribe to JPEG previews from the desktop. The configured rate is
+30 fps; diagnostics reports the observed capture rate. System clock synchronization
+does not remove transport delay or align exposures.
 
 `source tools/camera_env.sh` loads the project's Fast DDS transport profile for
 both camera publishers and the dataset writer. It uses a 256 MiB shared-memory
 segment per participant, a 16 MiB maximum message size, and an 8192-entry receive
-queue for native images. UDP remains available for discovery and communication
+queue for image messages. UDP remains available for discovery and communication
 with the desktop. Start both processes from terminals that have sourced this
 environment; the default 512 KiB shared-memory segment is too small for a single
-2560×1984 RGB8 frame. See the [Fast DDS shared-memory documentation](https://fast-dds.docs.eprosima.com/en/2.6.x/fastdds/transport/shared_memory/shared_memory.html).
+640 x 480 RGB8 frame. See the [Fast DDS shared-memory documentation](https://fast-dds.docs.eprosima.com/en/2.6.x/fastdds/transport/shared_memory/shared_memory.html).
 
 Start `ros2 run data_collection writer` in another Jetson terminal after capture
 is running. The desktop's independent `ros2 run data_collection record` controls

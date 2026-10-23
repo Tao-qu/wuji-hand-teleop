@@ -1,6 +1,6 @@
 # Uncalibrated: replace this file with this camera's measured intrinsics.
-image_width: 2560
-image_height: 1984
+image_width: 640
+image_height: 480
 camera_name: left_wrist
 camera_matrix:
   rows: 3

@@ -41,8 +41,8 @@ void field(diagnostic_msgs::msg::DiagnosticStatus& status, const std::string& ke
 GmslCameraNode::GmslCameraNode() : Node("gmsl", "/cameras") {
   const auto names = declare_parameter<std::vector<std::string>>(
       "cameras", {"head_left", "head_right", "left_wrist", "right_wrist"});
-  const int width = declare_parameter("width", 2560);
-  const int height = declare_parameter("height", 1984);
+  const int width = declare_parameter("width", 640);
+  const int height = declare_parameter("height", 480);
   const int fps = declare_parameter("fps", 30);
   preview_width_ = declare_parameter("preview.width", 640);
   preview_fps_ = declare_parameter("preview.fps", 10.0);

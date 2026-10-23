@@ -1,6 +1,6 @@
 # Continuous recording
 
-The recorder saves LeRobot v2.1 datasets at 30 Hz. Full hands + arms
+The recorder uses a 30 Hz timeline for LeRobot v2.1 datasets. Full hands + arms
 teleoperation and all five cameras must already be running. Recording owns no
 robot connection: it reads robot topics, computes measured palm poses with local
 FK, and sends numeric samples to the Jetson. The Jetson aligns camera frames and
@@ -46,6 +46,9 @@ The desktop recording configuration selects the dataset directory on the
 `--output PATH` overrides that setting for the lifetime of the writer. Keep this
 process and camera capture running across episodes. The writer does not start
 cameras.
+
+Use a new `output` directory when an existing dataset contains different image
+dimensions. Episodes with different resolutions cannot share one dataset.
 
 Start full teleoperation on the desktop:
 
@@ -177,15 +180,21 @@ and state both refer to the robot palm TCP from the Tianji tool configuration.
 
 | Image feature | Source topic | Supplied resolution |
 | --- | --- | --- |
-| `observation.rgb.head_left` | `/cameras/head_left/image_raw` | 2560 × 1984 |
-| `observation.rgb.head_right` | `/cameras/head_right/image_raw` | 2560 × 1984 |
-| `observation.rgb.left_wrist` | `/cameras/left_wrist/image_raw` | 2560 × 1984 |
-| `observation.rgb.right_wrist` | `/cameras/right_wrist/image_raw` | 2560 × 1984 |
-| `observation.rgb.d435` | `/cameras/d435/color/image_raw` | 1280 × 720 |
-| `observation.depth.d435` | `/cameras/d435/depth/image_rect_raw` | 1280 × 720 |
+| `observation.rgb.head_left` | `/cameras/head_left/image_raw` | 640 × 480 |
+| `observation.rgb.head_right` | `/cameras/head_right/image_raw` | 640 × 480 |
+| `observation.rgb.left_wrist` | `/cameras/left_wrist/image_raw` | 640 × 480 |
+| `observation.rgb.right_wrist` | `/cameras/right_wrist/image_raw` | 640 × 480 |
+| `observation.rgb.d435` | `/cameras/d435/color/image_raw` | 640 × 480 |
+| `observation.depth.d435` | `/cameras/d435/depth/image_rect_raw` | 640 × 480 |
 
-RGB streams remain separate at their source resolution and are encoded as
-H.264 MP4, 4:2:0, 30 fps, without audio. On the Jetson, the writer automatically
+Each GMSL camera internally captures 2560 × 1984, crops 32 rows from the top and
+bottom, and uses hardware scaling from 2560 × 1920 to 640 × 480 before ROS
+publication. D435 color and depth are requested directly at 640 × 480 and 30 fps.
+The recorder stores only these 640 × 480 streams; original-resolution images
+are neither published nor saved.
+
+The five RGB streams remain separate and are encoded as H.264 MP4, 4:2:0,
+30 fps, without audio. On the Jetson, the writer automatically
 uses an in-process GStreamer `appsrc` and `nvv4l2h264enc` pipeline when its
 Python bindings and plugins are available, with variable
 bitrate `max(1,000,000, width × height × 30 × 0.2)` bits/s. Otherwise it uses

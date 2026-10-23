@@ -2,7 +2,7 @@
 
 A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. Two MANUS gloves supply finger motion; five HTC Vive Trackers supply chest, hand-back, and upper-arm poses. Finger retargeting and hand communication use the official `wuji-sdk==2026.10.12`. RViz uses the official Hand 2.2 model.
 
-Jetson camera capture provides four separate GMSL images and D435 color/depth streams. Independent data collection saves 30 Hz LeRobot v2.1 episodes with robot actions, measured states, five RGB videos, and lossless depth. Policy inference is not implemented yet.
+Jetson camera capture provides four separate GMSL images and D435 color/depth streams, all at 640 × 480. Independent data collection uses a 30 Hz LeRobot v2.1 timeline with robot actions, measured states, five RGB videos, and lossless depth. Policy inference is not implemented yet.
 
 ## Hardware and modes
 
@@ -158,7 +158,7 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 | `src/output_devices/tianji_output/` | Shared Tianji ROS driver, pure kinematics, and tool parameters |
 | `src/wuji_teleop_bringup/` | Teleoperation, Home, and Preview launch composition |
 | `src/wuji_teleop_monitor/` | Qt monitor and brake tool |
-| `src/camera/gmsl_camera/` | Four full-resolution GMSL streams and optional JPEG previews |
+| `src/camera/gmsl_camera/` | Four GMSL streams cropped and scaled to 640 × 480, plus optional JPEG previews |
 | `src/camera/camera_bringup/` | Jetson camera configuration, initialization, and GMSL/D435 launch |
 | `src/data_collection/` | Desktop recording session and Jetson LeRobot v2.1 dataset writer |
 | `src/data_collection_interfaces/` | Numeric frame and recording session ROS interfaces |
@@ -214,7 +214,7 @@ ros2 run camera_bringup init_gmsl.sh
 ros2 launch camera_bringup cameras.launch.py
 ```
 
-`/cameras/gmsl` publishes independent `head_left`, `head_right`, `left_wrist`, and `right_wrist` images, each at 2560 × 1984 with 30 fps requested. `/cameras/d435` uses the official RealSense driver for 1280 × 720 color and depth at 30 fps. Ctrl-C stops both processes. `gmsl:=false` or `d435:=false` selects one camera family.
+`/cameras/gmsl` publishes independent `head_left`, `head_right`, `left_wrist`, and `right_wrist` images at 640 × 480, with 30 fps requested. Internally, each 2560 × 1984 sensor image is cropped by 32 rows at the top and bottom, then scaled from 2560 × 1920 to 640 × 480 by Jetson hardware before ROS publication. `/cameras/d435` requests native 640 × 480 color and depth at 30 fps through the official RealSense driver. Only the 640 × 480 streams are published and recorded; original-resolution images are not published or saved. Ctrl-C stops both processes. `gmsl:=false` or `d435:=false` selects one camera family.
 
 On the **desktop**, load the teleoperation environment for ROS subscriptions:
 
@@ -226,7 +226,7 @@ export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 
 `tools/camera_env.sh` loads the Jetson camera build; `tools/env.sh` loads the desktop teleoperation build. Deploying cameras does not create `install_camera/` on the desktop.
 
-Keep full-resolution capture and recording on the Jetson: the four GMSL RGB streams alone would require about 14.6 Gbit/s at 30 fps. Desktop viewers can use `/cameras/<role>/preview/compressed`. See [camera topics, configuration, timestamps, and deployment](docs/CAMERAS.md) for details.
+Keep capture and recording on the Jetson. The five RGB streams and one depth stream together carry about 156.7 MB/s at 30 fps before DDS overhead, exceeding the 1 Gbit/s desktop link. Desktop viewers can use `/cameras/<role>/preview/compressed`. See [camera topics, configuration, timestamps, and deployment](docs/CAMERAS.md) for details.
 
 ## Record demonstrations
 
@@ -236,7 +236,7 @@ Start cameras on the Jetson and full hands + arms teleoperation on the desktop. 
 ros2 run data_collection writer
 ```
 
-Set `task` and `output` in the desktop's `src/data_collection/config/recording.yaml`. The output defaults to `~/Datasets/tianji-wuji2` on the Jetson; `~` and relative paths resolve on the Jetson. An explicit writer `--output PATH` overrides the configured path. In a separate desktop terminal:
+Set `task` and `output` in the desktop's `src/data_collection/config/recording.yaml`. The output defaults to `~/Datasets/tianji-wuji2` on the Jetson; `~` and relative paths resolve on the Jetson. An explicit writer `--output PATH` overrides the configured path. Choose a new dataset directory if existing episodes use different image dimensions. In a separate desktop terminal:
 
 ```bash
 source tools/env.sh
