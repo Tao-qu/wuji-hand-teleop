@@ -250,7 +250,6 @@ class RecordingWorker(Node):
             return False
         message, arrived = self._pending[0]
         target_ns = int(message.timestamp_ns)
-        tolerance_ns = (1_000_000_000 + FPS - 1) // FPS
         have_future = all(
             buffer and max(item[0] for item in buffer) >= target_ns
             for buffer in self._images.values()
@@ -260,32 +259,13 @@ class RecordingWorker(Node):
         if not have_future and waiting:
             return False
         matched = {
-            key: nearest_image(buffer, target_ns, tolerance_ns)
+            key: nearest_image(buffer, target_ns)
             for key, buffer in self._images.items()
         }
         missing = [key for key, value in matched.items() if value is None]
         if missing:
-            # A newer image can arrive before a matching older image. Allow
-            # transport/callback latency without widening source-time alignment.
-            if waiting:
-                return False
-            details = []
-            for key in missing:
-                stamps = [item[0] for item in self._images[key]]
-                if stamps:
-                    nearest = min(stamps, key=lambda stamp: (abs(stamp - target_ns), stamp))
-                    details.append(
-                        f"{key} (nearest={(nearest - target_ns) / 1e6:+.1f} ms, "
-                        f"range=[{(min(stamps) - target_ns) / 1e6:+.1f}, "
-                        f"{(max(stamps) - target_ns) / 1e6:+.1f}] ms)"
-                    )
-                else:
-                    details.append(f"{key} (no images received)")
-            age_ms = (self.get_clock().now().nanoseconds - target_ns) / 1e6
             raise RuntimeError(
-                f"Frame {message.frame_index} has no image within one frame period: "
-                + ", ".join(details)
-                + f"; target age={age_ms:.1f} ms, waited={waited * 1000:.1f} ms"
+                f"Frame {message.frame_index} has no images received: " + ", ".join(missing)
             )
         try:
             # Keep references now, before encoder or disk work can age the camera

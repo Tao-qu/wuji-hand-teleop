@@ -214,10 +214,19 @@ torque, current, infrared, and point clouds are not recorded.
 
 The desktop samples the latest robot values at or before each 30 Hz tick.
 The writer reads serialized ROS Image buffers without materializing another
-full pixel array. It retains 32 images per stream and allows up to 500 ms for
-image delivery after a recording tick arrives. This delivery wait does not
-change alignment: each tick still selects the nearest source image within one
-frame period (33.333 ms). Image pairing runs separately from encoding. The five
+full pixel array. It retains 32 images per stream and selects the cached image
+whose source timestamp is nearest to each tick, without a maximum timestamp
+offset. If a stream has no image at or after the tick yet, the writer allows up
+to 500 ms from the tick's arrival for a newer image to arrive. This is an arrival
+grace period, not a limit on the selected image's timestamp offset.
+
+During camera gaps, multiple ticks can reuse a cached image, including across a
+long gap. Each selected image keeps its original `source_timestamp`; reused
+images repeat that timestamp. The 30 Hz output timeline remains separate from
+these source timestamps. The recorder performs no temporal image interpolation.
+Use the source timestamps for filtering and realignment during postprocessing.
+
+Image pairing runs separately from encoding. The five
 RGB encoders run concurrently. Parquet construction, compression, and statistics
 use a separate process with at most two ordered ten-frame groups in flight.
 Only numeric rows, depth, and small RGB samples cross this process boundary.

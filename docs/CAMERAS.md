@@ -235,9 +235,12 @@ backend converts each buffer's GStreamer PTS and pipeline base time to Jetson
 system time. If PTS is unavailable, it uses receive time; diagnostics identifies
 which is in use. PTS has not been established as the exact exposure time. There
 is no claim of hardware synchronization between four Argus sources or the D435.
-Independent workers publish frames as they arrive; the dataset writer aligns
-them by source timestamps on a 30 Hz grid. RealSense timestamp conversion remains
-owned by the official driver.
+Independent workers publish frames as they arrive. For each 30 Hz output tick,
+the dataset writer selects the nearest cached source image without a timestamp
+offset cutoff and preserves its original source timestamp. Gaps may reuse an
+image and its timestamp; use those timestamps for postprocessing. See
+[recording alignment](RECORDING.md#recorded-fields) for the arrival grace period.
+RealSense timestamp conversion remains owned by the official driver.
 
 At 30 fps, the five 640 x 480 RGB8 streams and one 640 x 480 16UC1 depth stream
 carry approximately 156.7 MB/s (1.25 Gbit/s) before DDS overhead. The current
