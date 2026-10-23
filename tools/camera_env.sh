@@ -23,4 +23,7 @@ if [[ -f "$_CAMERA_DEP_PREFIX/local_setup.bash" ]]; then
 fi
 source "$_CAMERA_ENV_ROOT/install_camera/local_setup.bash"
 export PYTHONPATH="$_CAMERA_ENV_ROOT/camera_dependencies/python${PYTHONPATH:+:$PYTHONPATH}"
+# Native GMSL RGB frames exceed the default Fast DDS shared-memory segment.
+# Use the same transport for the Jetson camera publishers and dataset writer.
+export FASTRTPS_DEFAULT_PROFILES_FILE="$_CAMERA_ENV_ROOT/src/camera/camera_bringup/config/fastdds.xml"
 unset _CAMERA_DEP_PREFIX _CAMERA_ENV_ROOT

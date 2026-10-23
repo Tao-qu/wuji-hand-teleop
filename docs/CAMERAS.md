@@ -240,6 +240,14 @@ from the desktop, and send only policy-sized images for inference. Actual captur
 and storage throughput must be selected for the intended recording mode. System
 clock synchronization does not remove transport delay or align exposures.
 
+`source tools/camera_env.sh` loads the project's Fast DDS transport profile for
+both camera publishers and the dataset writer. It uses a 256 MiB shared-memory
+segment per participant, a 16 MiB maximum message size, and an 8192-entry receive
+queue for native images. UDP remains available for discovery and communication
+with the desktop. Start both processes from terminals that have sourced this
+environment; the default 512 KiB shared-memory segment is too small for a single
+2560×1984 RGB8 frame. See the [Fast DDS shared-memory documentation](https://fast-dds.docs.eprosima.com/en/2.6.x/fastdds/transport/shared_memory/shared_memory.html).
+
 Start `ros2 run data_collection writer` in another Jetson terminal after capture
 is running. The desktop's independent `ros2 run data_collection record` controls
 episode start, stop, retry, and save. RGB encoding and lossless depth storage stay
