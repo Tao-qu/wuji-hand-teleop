@@ -1,13 +1,17 @@
 """Streaming LeRobot v2.1 episodes with H.264 RGB and lossless uint16 depth."""
 
 import copy
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, wait
 import fcntl
 from functools import lru_cache
 import json
+import math
+import multiprocessing
 import os
 from pathlib import Path
 import select
 import shutil
+import signal
 import subprocess
 import time
 import uuid
@@ -96,22 +100,27 @@ class _Moments:
     def __init__(self):
         self.count = 0
 
-    def add(self, values, axes=None):
-        values = np.asarray(values, dtype=np.float64)
-        low, high = values.min(axis=axes), values.max(axis=axes)
-        mean, variance = values.mean(axis=axes), values.var(axis=axes)
+    def add(self, values, axes=None, count=1):
+        values = np.asarray(values)
+        if values.dtype != np.uint16:
+            values = values.astype(np.float64, copy=False)
+        low = np.asarray(values.min(axis=axes), dtype=np.float64)
+        high = np.asarray(values.max(axis=axes), dtype=np.float64)
+        mean = values.mean(axis=axes, dtype=np.float64)
+        variance = values.var(axis=axes, dtype=np.float64)
         if not self.count:
             self.low, self.high = low, high
             self.mean, self.variance = mean, variance
         else:
             self.low, self.high = np.minimum(self.low, low), np.maximum(self.high, high)
             delta = mean - self.mean
-            self.mean = self.mean + delta / (self.count + 1)
+            total = self.count + count
+            self.mean = self.mean + delta * count / total
             self.variance = (
-                self.count * self.variance + variance
-                + delta * delta * self.count / (self.count + 1)
-            ) / (self.count + 1)
-        self.count += 1
+                self.count * self.variance + count * variance
+                + delta * delta * self.count * count / total
+            ) / total
+        self.count += count
 
     def result(self, video=False):
         def convert(value):
@@ -129,35 +138,61 @@ class _Moments:
 class _Video:
     @staticmethod
     @lru_cache(maxsize=1)
+    def _gstreamer():
+        try:
+            import gi
+            gi.require_version("Gst", "1.0")
+            from gi.repository import Gst
+        except (ImportError, ValueError):
+            return None
+        Gst.init(None)
+        plugins = ("appsrc", "videoconvert", "nvvidconv", "nvv4l2h264enc", "h264parse", "mp4mux", "filesink")
+        return Gst if all(Gst.ElementFactory.find(plugin) for plugin in plugins) else None
+
+    @staticmethod
     def hardware_encoding_available():
-        if not shutil.which("gst-launch-1.0") or not shutil.which("gst-inspect-1.0"):
-            return False
-        for plugin in ("nvv4l2h264enc", "nvvidconv", "rawvideoparse", "h264parse", "mp4mux"):
-            result = subprocess.run(
-                ["gst-inspect-1.0", plugin], stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, timeout=5, check=False,
-            )
-            if result.returncode:
-                return False
-        return True
+        return _Video._gstreamer() is not None
 
     def __init__(self, path, shape, fps):
         height, width, _ = shape
         self.path = path
         self.log_path = path.with_suffix(".log")
-        self.log = self.log_path.open("wb")
-        if self.hardware_encoding_available():
-            # Jetson hardware encoding keeps the five native streams off the CPU.
+        self.log = None
+        self.process = None
+        self.pipeline = None
+        self.source = None
+        self.bus = None
+        self._closed = False
+        self._gst = self._gstreamer()
+        self._fps = fps
+        self._frame_index = 0
+        if self._gst is not None:
+            # Feed frames directly to GStreamer, avoiding five large raw-video pipes.
             bitrate = max(1_000_000, round(width * height * fps * 0.2))
-            command = [
-                "gst-launch-1.0", "-q", "fdsrc", "fd=0", "!", "rawvideoparse",
-                "format=rgb", f"width={width}", f"height={height}", f"framerate={fps}/1",
-                "!", "videoconvert", "!", "video/x-raw,format=RGBA", "!", "nvvidconv",
-                "!", "video/x-raw(memory:NVMM),format=NV12", "!", "nvv4l2h264enc",
-                "control-rate=0", f"bitrate={bitrate}", f"iframeinterval={fps}",
-                "insert-sps-pps=true", "!", "h264parse", "!", "mp4mux", "!", "filesink",
-                f"location={path}",
-            ]
+            self._queue_bytes = height * width * 3 * 2
+            Gst = self._gst
+            try:
+                self.pipeline = Gst.parse_launch(
+                    "appsrc name=source format=time is-live=false block=false "
+                    f"max-bytes={self._queue_bytes} ! videoconvert ! "
+                    "video/x-raw,format=RGBA ! nvvidconv ! "
+                    "video/x-raw(memory:NVMM),format=NV12 ! nvv4l2h264enc "
+                    f"control-rate=0 bitrate={bitrate} iframeinterval={fps} "
+                    "maxperf-enable=true insert-sps-pps=true ! h264parse ! mp4mux ! filesink name=sink"
+                )
+                self.source = self.pipeline.get_by_name("source")
+                self.source.set_property("caps", Gst.Caps.from_string(
+                    f"video/x-raw,format=RGB,width={width},height={height},framerate={fps}/1"
+                ))
+                self.pipeline.get_by_name("sink").set_property("location", str(path))
+                self.bus = self.pipeline.get_bus()
+                if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+                    self._check_gstreamer_error()
+                    raise RuntimeError("RGB encoder could not start")
+                self._check_gstreamer_error()
+            except Exception:
+                self.abort()
+                raise
         else:
             command = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
@@ -166,18 +201,77 @@ class _Video:
                 "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p",
                 "-threads", "2", "-movflags", "+faststart", str(path),
             ]
-        self.process = subprocess.Popen(
-            command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-            stderr=self.log, bufsize=0,
-        )
-        os.set_blocking(self.process.stdin.fileno(), False)
+            self.log = self.log_path.open("wb")
+            try:
+                self.process = subprocess.Popen(
+                    command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                    stderr=self.log, bufsize=0,
+                )
+                os.set_blocking(self.process.stdin.fileno(), False)
+            except Exception:
+                self.abort()
+                raise
 
     def _error(self):
         return self.log_path.read_text(errors="replace")[-2000:]
 
+    @staticmethod
+    def _gstreamer_error(message):
+        error, debug = message.parse_error()
+        return RuntimeError(f"RGB encoder failed: {error.message}; {debug or ''}")
+
+    def _check_gstreamer_error(self):
+        message = self.bus.pop_filtered(self._gst.MessageType.ERROR)
+        if message is not None:
+            raise self._gstreamer_error(message)
+
     def write(self, array):
-        remaining = memoryview(np.ascontiguousarray(array)).cast("B")
+        if self._closed:
+            raise RuntimeError("RGB encoder is already closed")
         deadline = time.monotonic() + 10.0
+        if self._gst is not None:
+            self._check_gstreamer_error()
+            # Bound queued raw frames without blocking inside push-buffer on encoder failure.
+            while self.source.get_property("current-level-bytes") >= self._queue_bytes:
+                self._check_gstreamer_error()
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("RGB encoder cannot keep up with recorded frames")
+                time.sleep(0.001)
+            Gst = self._gst
+            pixels = np.ascontiguousarray(array)
+            owner = pixels
+            while isinstance(owner, (np.ndarray, memoryview)):
+                parent = owner.base if isinstance(owner, np.ndarray) else owner.obj
+                if parent is None:
+                    break
+                owner = parent
+            if isinstance(owner, bytes):
+                # Raw ROS images view their serialized bytes after a small header.
+                # Wrap that owner and trim the span instead of copying pixels twice.
+                offset = (pixels.__array_interface__["data"][0]
+                          - np.frombuffer(owner, dtype=np.uint8).__array_interface__["data"][0])
+                if not 0 <= offset <= len(owner) - pixels.nbytes:
+                    owner, offset = pixels.tobytes(), 0
+            else:
+                owner, offset = pixels.tobytes(), 0
+            # The notify closure keeps the immutable bytes alive until GStreamer
+            # releases this read-only memory, without copying a native image.
+            buffer = Gst.Buffer.new_wrapped_full(
+                Gst.MemoryFlags.READONLY, owner, len(owner), 0, None,
+                lambda *args, owner=owner: None,
+            )
+            buffer.resize(offset, pixels.nbytes)
+            buffer.pts = self._frame_index * Gst.SECOND // self._fps
+            buffer.duration = (self._frame_index + 1) * Gst.SECOND // self._fps - buffer.pts
+            buffer.offset = self._frame_index
+            buffer.offset_end = self._frame_index + 1
+            result = self.source.emit("push-buffer", buffer)
+            if result != Gst.FlowReturn.OK:
+                self._check_gstreamer_error()
+                raise RuntimeError(f"RGB encoder rejected a frame: {result.value_nick}")
+            self._frame_index += 1
+            return
+        remaining = memoryview(np.ascontiguousarray(array)).cast("B")
         descriptor = self.process.stdin.fileno()
         while remaining:
             if self.process.poll() is not None:
@@ -196,6 +290,26 @@ class _Video:
             remaining = remaining[written:]
 
     def finish(self):
+        if self._closed:
+            return
+        if self._gst is not None:
+            Gst = self._gst
+            try:
+                self._check_gstreamer_error()
+                result = self.source.emit("end-of-stream")
+                if result != Gst.FlowReturn.OK:
+                    self._check_gstreamer_error()
+                    raise RuntimeError(f"RGB encoder rejected end of stream: {result.value_nick}")
+                message = self.bus.timed_pop_filtered(
+                    60 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR,
+                )
+                if message is None:
+                    raise RuntimeError("RGB encoder did not finish")
+                if message.type == Gst.MessageType.ERROR:
+                    raise self._gstreamer_error(message)
+            finally:
+                self.abort()
+            return
         if self.process.stdin and not self.process.stdin.closed:
             self.process.stdin.close()
         try:
@@ -204,16 +318,120 @@ class _Video:
             self.abort()
             raise RuntimeError("RGB encoder did not finish") from None
         self.log.close()
+        self._closed = True
         if result:
             raise RuntimeError(f"RGB encoder failed: {self._error()}")
 
     def abort(self):
-        if self.process.poll() is None:
-            self.process.kill()
-        self.process.wait()
-        if self.process.stdin and not self.process.stdin.closed:
-            self.process.stdin.close()
-        self.log.close()
+        if self.pipeline is not None:
+            self.pipeline.set_state(self._gst.State.NULL)
+            self.pipeline = None
+            self.source = None
+            self.bus = None
+        if self.process is not None:
+            if self.process.poll() is None:
+                self.process.kill()
+            self.process.wait()
+            if self.process.stdin and not self.process.stdin.closed:
+                self.process.stdin.close()
+        if self.log is not None:
+            self.log.close()
+        self._closed = True
+
+
+class _BatchWriter:
+    """Parquet and statistics owner, created only in the spawned worker."""
+
+    _current = None
+
+    def __init__(self, path, features):
+        # Trigger Arrow's optional imports before recording starts.
+        pa.array(np.empty(0, dtype=np.uint16), type=pa.uint16())
+        self.schema = _arrow_schema(features)
+        self.stats = {}
+        self.writer = pq.ParquetWriter(
+            path, self.schema, compression="zstd", compression_level=1,
+            use_dictionary=False, use_byte_stream_split=True,
+        )
+        self.stats_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="statistics")
+
+    @classmethod
+    def initialize(cls, path, features):
+        # The parent handles Ctrl-C and joins this writer before releasing its lock.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        cls._current = cls(path, features)
+
+    @classmethod
+    def ready(cls):
+        return cls._current is not None
+
+    @classmethod
+    def write(cls, batch):
+        cls._current._write(batch)
+
+    @classmethod
+    def finish(cls):
+        instance = cls._current
+        cls.close()
+        return {
+            key: value.result(video=key in RGB_KEYS)
+            for key, value in instance.stats.items()
+        }
+
+    @classmethod
+    def close(cls):
+        instance = cls._current
+        if instance is None:
+            return
+        if instance.stats_pool is not None:
+            instance.stats_pool.shutdown(wait=True)
+            instance.stats_pool = None
+        if instance.writer is not None:
+            try:
+                instance.writer.close()
+            finally:
+                instance.writer = None
+
+    def _write(self, batch):
+        count = len(batch)
+        rows = [entry[0] for entry in batch]
+        depth = np.stack([entry[1] for entry in batch])
+        stats_job = self.stats_pool.submit(self._update_stats, rows, depth, batch)
+        try:
+            _, height, width = depth.shape
+            arrays = []
+            for field in self.schema:
+                if field.name == DEPTH_KEY:
+                    pixels = pa.array(depth.reshape(-1), type=pa.uint16())
+                    image_rows = pa.ListArray.from_arrays(
+                        np.arange(count * height + 1, dtype=np.int32) * width, pixels,
+                    )
+                    array = pa.ListArray.from_arrays(
+                        np.arange(count + 1, dtype=np.int32) * height, image_rows,
+                    )
+                    array = pa.ExtensionArray.from_storage(field.type, array)
+                else:
+                    array = pa.array([row[field.name] for row in rows], type=field.type)
+                arrays.append(array)
+            self.writer.write_table(
+                pa.Table.from_arrays(arrays, schema=self.schema), row_group_size=10,
+            )
+        finally:
+            # A failed Parquet write must not leave statistics touching this batch.
+            wait([stats_job])
+        stats_job.result()
+
+    def _update_stats(self, rows, depth, batch):
+        count = len(batch)
+        for key in rows[0]:
+            values = np.asarray([row[key] for row in rows], dtype=np.float64)
+            self.stats.setdefault(key, _Moments()).add(values, axes=0, count=count)
+        for key in RGB_KEYS:
+            samples = np.asarray([entry[2][key] for entry in batch], dtype=np.float64) / 255.0
+            self.stats.setdefault(key, _Moments()).add(
+                samples, axes=(0, 1, 2), count=count,
+            )
+        self.stats.setdefault(DEPTH_KEY, _Moments()).add(depth, count=count)
 
 
 class DatasetStore:
@@ -234,6 +452,9 @@ class DatasetStore:
         self._candidate = None
         self._calibration = None
         try:
+            # Complete cold imports before the writer subscribes to native images.
+            pa.array(np.empty(0, dtype=np.uint16), type=pa.uint16())
+            _Video._gstreamer()
             self._recover_commit()
             self._load()
         except Exception:
@@ -303,8 +524,9 @@ class DatasetStore:
         task_index = next((item["task_index"] for item in self.tasks if item["task"] == task), len(self.tasks))
         self._candidate = {
             "index": index, "task": task, "task_index": task_index, "directory": directory,
-            "frames": 0, "videos": {}, "writer": None, "tables": [], "stats": {},
-            "features": None, "finished": False,
+            "frames": 0, "videos": {}, "rows": [], "stats": {},
+            "features": None, "finished": False, "error": None,
+            "video_pool": None, "parquet_pool": None, "writes": [],
         }
 
     def prepare(self, image_shapes):
@@ -318,18 +540,35 @@ class DatasetStore:
         if self.info is not None and features != self.info["features"]:
             raise ValueError("Recorded feature names or camera dimensions differ from this dataset")
         candidate["features"] = features
-        candidate["schema"] = _arrow_schema(features)
-        candidate["writer"] = pq.ParquetWriter(
-            candidate["directory"] / "episode.parquet", candidate["schema"],
-            compression="zstd", compression_level=3, use_dictionary=False,
-        )
-        for key in RGB_KEYS:
-            candidate["videos"][key] = _Video(candidate["directory"] / f"{key}.mp4", image_shapes[key], self.fps)
+        try:
+            candidate["parquet_pool"] = ProcessPoolExecutor(
+                max_workers=1, mp_context=multiprocessing.get_context("spawn"),
+                initializer=_BatchWriter.initialize,
+                initargs=(candidate["directory"] / "episode.parquet", features),
+            )
+            # Spawn, import and open the child writer before timed frames arrive.
+            candidate["parquet_pool"].submit(_BatchWriter.ready).result()
+            for key in RGB_KEYS:
+                candidate["videos"][key] = _Video(
+                    candidate["directory"] / f"{key}.mp4", image_shapes[key], self.fps,
+                )
+            candidate["video_pool"] = ThreadPoolExecutor(
+                max_workers=len(RGB_KEYS), thread_name_prefix="rgb",
+            )
+        except Exception as error:
+            candidate["error"] = error
+            self._close_workers(candidate)
+            for encoder in candidate["videos"].values():
+                encoder.abort()
+            raise
 
     def append(self, numeric_row, images, timestamps):
         candidate = self._candidate
         if candidate is None or candidate["finished"]:
             raise RuntimeError("Begin an episode before appending frames")
+        if candidate["error"] is not None:
+            raise candidate["error"]
+        self._check_writes()
         index = candidate["frames"]
         if "frame_index" in numeric_row and numeric_row["frame_index"] != index:
             raise ValueError("Episode frame indices must be contiguous")
@@ -338,9 +577,12 @@ class DatasetStore:
         row = {}
         for key, size in NUMERIC_SHAPES.items():
             value = np.asarray(numeric_row[key], dtype=np.float64)
-            if value.shape != (size,) or not np.isfinite(value).all():
+            if value.shape != (size,):
                 raise ValueError(f"{key} must contain {size} finite values")
-            row[key] = value
+            values = value.tolist()
+            if not all(math.isfinite(item) for item in values):
+                raise ValueError(f"{key} must contain {size} finite values")
+            row[key] = values
         for key in IMAGE_KEYS:
             image = images[key]
             if key == DEPTH_KEY:
@@ -351,7 +593,7 @@ class DatasetStore:
                 raise ValueError(f"{key} must be RGB8 with even native width and height for yuv420p")
         for key in SOURCE_TIMESTAMP_KEYS:
             value = timestamps[key] if key in timestamps else timestamps[key.removeprefix("source_timestamp.")]
-            if not isinstance(value, (int, np.integer)) or not 0 < int(value) <= np.iinfo(np.int64).max:
+            if not isinstance(value, (int, np.integer)) or not 0 < int(value) < (1 << 63):
                 raise ValueError(f"{key} must be positive int64 nanoseconds")
             row[key] = int(value)
         if candidate["features"] is None:
@@ -363,41 +605,79 @@ class DatasetStore:
             "episode_index": candidate["index"], "task_index": candidate["task_index"],
             "index": (self.info["total_frames"] if self.info else 0) + index,
         })
-        for key, encoder in candidate["videos"].items():
-            encoder.write(images[key])
-        arrays = []
-        for field in candidate["schema"]:
-            if field.name == DEPTH_KEY:
-                depth = np.ascontiguousarray(images[DEPTH_KEY])
-                height, width = depth.shape
-                pixels = pa.array(depth.reshape(-1), type=pa.uint16())
-                rows = pa.ListArray.from_arrays(np.arange(height + 1, dtype=np.int32) * width, pixels)
-                array = pa.ListArray.from_arrays(np.array([0, height], dtype=np.int32), rows)
-                array = pa.ExtensionArray.from_storage(field.type, array)
-            else:
-                value = row[field.name]
-                array = pa.array([value.tolist() if isinstance(value, np.ndarray) else value], type=field.type)
-            arrays.append(array)
-        candidate["tables"].append(pa.Table.from_arrays(arrays, schema=candidate["schema"]))
-        if len(candidate["tables"]) >= 10:
-            self._flush()
-        for key, value in row.items():
-            moments = candidate["stats"].setdefault(key, _Moments())
-            # Keep every joint independently; scalar statistics retain one dimension.
-            moments.add(np.asarray(value)[None, ...], axes=0)
-        for key in RGB_KEYS:
-            image = images[key]
-            step = max(1, max(image.shape[:2]) // 150)
-            sample = image[::step, ::step].astype(np.float64) / 255.0
-            candidate["stats"].setdefault(key, _Moments()).add(sample, axes=(0, 1))
-        candidate["stats"].setdefault(DEPTH_KEY, _Moments()).add(images[DEPTH_KEY])
-        candidate["frames"] += 1
+        video_jobs = []
+        try:
+            for key, encoder in candidate["videos"].items():
+                video_jobs.append(candidate["video_pool"].submit(encoder.write, images[key]))
+            samples = {}
+            for key in RGB_KEYS:
+                image = images[key]
+                step = max(1, max(image.shape[:2]) // 150)
+                # Samples own their small buffers; never pin a native RGB image
+                # in the Parquet queue through a strided NumPy view.
+                samples[key] = image[::step, ::step].copy()
+            candidate["rows"].append((row, images[DEPTH_KEY], samples))
+            if len(candidate["rows"]) >= 10:
+                self._flush()
+            # Complete this frame before dispatching another write to any encoder.
+            wait(video_jobs)
+            for job in video_jobs:
+                job.result()
+            self._check_writes()
+            candidate["frames"] += 1
+        except Exception as error:
+            candidate["error"] = error
+            raise
+        finally:
+            # Cleanup must never race an encoder still using this frame's pixels.
+            wait(video_jobs)
+
+    def _check_writes(self, drain=False):
+        candidate = self._candidate
+        while candidate["writes"] and (drain or candidate["writes"][0].done()):
+            job = candidate["writes"][0]
+            try:
+                job.result()
+            except Exception as error:
+                candidate["error"] = error
+                raise
+            candidate["writes"].pop(0)
 
     def _flush(self):
         candidate = self._candidate
-        if candidate["tables"]:
-            candidate["writer"].write_table(pa.concat_tables(candidate["tables"]), row_group_size=10)
-            candidate["tables"].clear()
+        self._check_writes()
+        if candidate["rows"]:
+            # At most two ten-frame groups are in flight, including the active write.
+            if len(candidate["writes"]) >= 2:
+                candidate["writes"][0].result()
+                self._check_writes()
+            batch = candidate["rows"]
+            candidate["writes"].append(candidate["parquet_pool"].submit(
+                _BatchWriter.write, batch,
+            ))
+            candidate["rows"] = []
+
+    @staticmethod
+    def _close_workers(candidate):
+        video_pool = candidate["video_pool"]
+        if video_pool is not None:
+            video_pool.shutdown(wait=True, cancel_futures=True)
+            candidate["video_pool"] = None
+        parquet_pool = candidate["parquet_pool"]
+        if parquet_pool is not None:
+            for job in candidate["writes"]:
+                job.cancel()
+            try:
+                # This runs after any uncancellable batch in the ordered worker.
+                parquet_pool.submit(_BatchWriter.close).result()
+            except Exception:
+                # A failed initializer or dead child cannot close its writer;
+                # shutdown still joins it before staging files can be removed.
+                pass
+            finally:
+                parquet_pool.shutdown(wait=True, cancel_futures=True)
+                candidate["parquet_pool"] = None
+        candidate["writes"].clear()
 
     def finish(self):
         if self._candidate is None:
@@ -405,16 +685,24 @@ class DatasetStore:
         candidate = self._candidate
         if candidate["finished"]:
             return
-        self._flush()
-        if candidate["writer"] is not None:
-            candidate["writer"].close()
-            candidate["writer"] = None
-        for encoder in candidate["videos"].values():
-            if candidate["frames"]:
-                encoder.finish()
-            else:
-                encoder.abort()
-        candidate["finished"] = True
+        try:
+            if candidate["error"] is not None:
+                raise candidate["error"]
+            self._flush()
+            self._check_writes(drain=True)
+            if candidate["parquet_pool"] is not None:
+                candidate["stats"] = candidate["parquet_pool"].submit(_BatchWriter.finish).result()
+            for encoder in candidate["videos"].values():
+                if candidate["frames"]:
+                    encoder.finish()
+                else:
+                    encoder.abort()
+            candidate["finished"] = True
+        except Exception as error:
+            candidate["error"] = error
+            raise
+        finally:
+            self._close_workers(candidate)
 
     def save(self):
         candidate = self._candidate
@@ -439,7 +727,7 @@ class DatasetStore:
         episodes = [*self.episodes, {"episode_index": index, "tasks": [candidate["task"]], "length": count}]
         stats = [*self.episode_stats, {
             "episode_index": index,
-            "stats": {key: value.result(video=key in RGB_KEYS) for key, value in candidate["stats"].items()},
+            "stats": candidate["stats"],
         }]
         info.update({
             "total_episodes": index + 1, "total_frames": info["total_frames"] + count,
@@ -492,20 +780,18 @@ class DatasetStore:
             return
         if (self.root / ".recording/commit.json").exists():
             raise RuntimeError("A save is in progress; reopen the dataset to complete it")
+        self._close_workers(candidate)
         for encoder in candidate["videos"].values():
             encoder.abort()
-        if candidate["writer"] is not None:
-            candidate["writer"].close()
         shutil.rmtree(candidate["directory"])
         self._candidate = None
 
     def close(self):
         if self._candidate is not None:
             candidate = self._candidate
+            self._close_workers(candidate)
             for encoder in candidate["videos"].values():
                 encoder.abort()
-            if candidate["writer"] is not None:
-                candidate["writer"].close()
             # Only an explicit discard removes an unfinished candidate.
             self._candidate = None
         if not self._lock.closed:

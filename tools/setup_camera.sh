@@ -37,7 +37,7 @@ source /opt/ros/humble/setup.bash
 if ! "$skip_system" && ! "$user_deps"; then
     sudo apt-get update
     sudo apt-get install -y build-essential cmake pkg-config python3-yaml python3-numpy \
-        python3-pip ffmpeg \
+        python3-pip python3-gi gir1.2-gstreamer-1.0 ffmpeg \
         python3-colcon-common-extensions libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev libopencv-dev libyaml-cpp-dev \
         gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
@@ -107,6 +107,10 @@ fi
     -r "$CAMERA_SETUP_ROOT/requirements-recording.txt"
 export PYTHONPATH="$CAMERA_SETUP_ROOT/camera_dependencies/python${PYTHONPATH:+:$PYTHONPATH}"
 /usr/bin/python3 -c 'import numpy, pyarrow'
+if ! /usr/bin/python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst' ; then
+    printf 'Install the GStreamer Python runtime: sudo apt-get install python3-gi gir1.2-gstreamer-1.0\n' >&2
+    exit 1
+fi
 if ! command -v ffmpeg >/dev/null || ! ffmpeg -hide_banner -encoders 2>/dev/null | grep ' libx264 ' >/dev/null; then
     printf 'Install FFmpeg with the libx264 encoder: sudo apt-get install ffmpeg\n' >&2
     exit 1

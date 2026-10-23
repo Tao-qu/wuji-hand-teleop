@@ -130,6 +130,8 @@ index and count. The final episode still waits for confirmation: **r** retries
 it, while **s** saves and exits when `end` or `num` has been reached.
 Ctrl-C aborts an unsaved candidate and exits the recording client. A save that
 has already started completes before the client exits.
+Failed recordings cannot be saved. Their confirmation prompt offers **r** to
+discard and retry, or Ctrl-C to discard and exit; **s** and **q** do not save them.
 
 ## Recorded fields
 
@@ -184,12 +186,14 @@ and state both refer to the robot palm TCP from the Tianji tool configuration.
 
 RGB streams remain separate at their source resolution and are encoded as
 H.264 MP4, 4:2:0, 30 fps, without audio. On the Jetson, the writer automatically
-uses GStreamer `nvv4l2h264enc` when its plugins are available, with variable
+uses an in-process GStreamer `appsrc` and `nvv4l2h264enc` pipeline when its
+Python bindings and plugins are available, with variable
 bitrate `max(1,000,000, width × height × 30 × 0.2)` bits/s. Otherwise it uses
 FFmpeg `libx264`, `ultrafast`, CRF 18, `yuv420p`. Both paths use lossy RGB
 compression. Depth is a `uint16` two-dimensional array in Parquet,
-with lossless Zstandard compression; the ROS depth unit is millimetres and zero
-means no depth measurement. Depth is not converted into RGB or video.
+with byte-stream-split encoding and lossless Zstandard compression at level 1;
+the ROS depth unit is millimetres and zero means no depth measurement.
+Depth is not converted into RGB or video.
 
 The dataset includes the selected samples' source timestamps in integer
 nanoseconds, plus the format's relative 30 Hz `timestamp` and indices.
@@ -200,9 +204,16 @@ image feature name above. It does not store receive times or source frame counte
 torque, current, infrared, and point clouds are not recorded.
 
 The desktop samples the latest robot values at or before each 30 Hz tick.
-The writer pairs each tick with the nearest image from each stream within one
-frame period. Image pairing runs separately from encoding. Stopping drains the
-ticks up to the stop keypress before presenting the save/retry prompt.
+The writer reads serialized ROS Image buffers without materializing another
+full pixel array. It retains 32 images per stream and allows up to 500 ms for
+image delivery after a recording tick arrives. This delivery wait does not
+change alignment: each tick still selects the nearest source image within one
+frame period (33.333 ms). Image pairing runs separately from encoding. The five
+RGB encoders run concurrently. Parquet construction, compression, and statistics
+use a separate process with at most two ordered ten-frame groups in flight.
+Only numeric rows, depth, and small RGB samples cross this process boundary.
+Stopping drains the ticks up to the stop keypress and finishes all video and
+Parquet writes before presenting the save/retry prompt.
 
 ## Dataset files
 

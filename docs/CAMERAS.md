@@ -98,7 +98,8 @@ Options:
 For `--user-deps`, ROS Humble and native build dependencies must already exist:
 
 ```bash
-sudo apt-get install build-essential cmake pkg-config python3-yaml python3-numpy python3-pip ffmpeg \
+sudo apt-get install build-essential cmake pkg-config python3-yaml python3-numpy python3-pip \
+  python3-gi gir1.2-gstreamer-1.0 ffmpeg \
   python3-colcon-common-extensions libgstreamer1.0-dev \
   libgstreamer-plugins-base1.0-dev libopencv-dev libyaml-cpp-dev \
   gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
@@ -108,7 +109,8 @@ sudo apt-get install build-essential cmake pkg-config python3-yaml python3-numpy
 The private dependency prefix is included by `tools/camera_env.sh`. The dataset
 writer's pinned Arrow wheel is installed under `camera_dependencies/python`; the
 system NumPy/OpenCV installation is preserved. The writer automatically uses
-GStreamer's NVIDIA H.264 encoder when its plugins are available, with FFmpeg
+GStreamer's NVIDIA H.264 encoder through Python GObject Introspection and an
+in-process `appsrc` pipeline when its plugins are available, with FFmpeg
 `libx264` as the software alternative. Standard GStreamer base, good, and bad
 plugins provide raw video parsing, color conversion, H.264 parsing, and MP4
 muxing; NVIDIA plugins come from the Jetson BSP. These dependencies also apply
