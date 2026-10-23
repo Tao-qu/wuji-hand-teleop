@@ -11,9 +11,10 @@ import time
 
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.task import Future
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import CameraInfo, Image
 from tf2_msgs.msg import TFMessage
@@ -21,7 +22,7 @@ from tf2_msgs.msg import TFMessage
 from data_collection_interfaces.msg import RecordingFrame
 from data_collection_interfaces.srv import SessionCommand
 
-from .imaging import image_to_numpy, nearest_image, stamp_nanoseconds
+from .imaging import image_from_cdr, image_to_numpy, nearest_image
 from .configuration import DEFAULT_OUTPUT, validate_output
 from .schema import DEPTH_KEY, FPS, ROBOT_SOURCE_STREAMS
 from .storage import DatasetStore
@@ -48,7 +49,7 @@ NUMERIC_FIELDS = {
 class Request:
     command: str
     payload: dict
-    event: threading.Event = field(default_factory=threading.Event)
+    completion: Future
     success: bool = False
     result: dict = field(default_factory=dict)
 
@@ -73,7 +74,9 @@ class RecordingWorker(Node):
         self._matched_frames = queue.Queue(maxsize=16)
         self._requests = queue.Queue(maxsize=16)
         self._pending = deque()
-        self._images = {key: deque(maxlen=10) for key in CAMERA_TOPICS}
+        # Retain one second of source history plus two frames while delayed
+        # robot samples and the other camera streams reach the matcher.
+        self._images = {key: deque(maxlen=FPS + 2) for key in CAMERA_TOPICS}
         self._camera_info = {}
         self._transforms = {}
         self._shutdown = threading.Event()
@@ -83,7 +86,7 @@ class RecordingWorker(Node):
         for key, topic in CAMERA_TOPICS.items():
             self._input_subscriptions.append(self.create_subscription(
                 Image, topic, lambda message, key=key: self._image(key, message),
-                qos_profile_sensor_data, callback_group=self._group,
+                qos_profile_sensor_data, callback_group=self._group, raw=True,
             ))
             info_topic = topic.rsplit("/", 1)[0] + "/camera_info"
             self._input_subscriptions.append(self.create_subscription(
@@ -114,8 +117,15 @@ class RecordingWorker(Node):
         self._thread.start()
         self.get_logger().info(f"Dataset writer ready: {self._output}")
 
-    def _image(self, key, message):
-        stamp = stamp_nanoseconds(message.header.stamp)
+    def _image(self, key, serialized):
+        try:
+            message = image_from_cdr(serialized)
+        except (TypeError, ValueError) as exc:
+            self.get_logger().error(
+                f"Invalid serialized image on {key}: {exc}", throttle_duration_sec=5.0
+            )
+            return
+        stamp = message.stamp_ns
         if stamp > 0:
             with self._lock:
                 self._images[key].append((stamp, message))
@@ -181,7 +191,7 @@ class RecordingWorker(Node):
                 ),
             }
 
-    def _command(self, request, response):
+    async def _command(self, request, response):
         try:
             payload = json.loads(request.payload_json or "{}")
             if not isinstance(payload, dict):
@@ -192,11 +202,9 @@ class RecordingWorker(Node):
                 return response
             if request.command not in ("configure", "start", "stop", "save", "discard"):
                 raise ValueError(f"Unknown recording command: {request.command}")
-            operation = Request(request.command, payload)
+            operation = Request(request.command, payload, Future(executor=self.executor))
             self._requests.put_nowait(operation)
-            while not operation.event.wait(0.25):
-                if self._shutdown.is_set():
-                    raise RuntimeError("Dataset writer is shutting down")
+            await operation.completion
             response.success = operation.success
             response.message_json = json.dumps(operation.result)
         except Exception as exc:
@@ -247,7 +255,9 @@ class RecordingWorker(Node):
             buffer and max(item[0] for item in buffer) >= target_ns
             for buffer in self._images.values()
         )
-        if not have_future and time.monotonic() - arrived < 0.15:
+        waited = time.monotonic() - arrived
+        waiting = waited < 0.5
+        if not have_future and waiting:
             return False
         matched = {
             key: nearest_image(buffer, target_ns, tolerance_ns)
@@ -255,9 +265,27 @@ class RecordingWorker(Node):
         }
         missing = [key for key, value in matched.items() if value is None]
         if missing:
+            # A newer image can arrive before a matching older image. Allow
+            # transport/callback latency without widening source-time alignment.
+            if waiting:
+                return False
+            details = []
+            for key in missing:
+                stamps = [item[0] for item in self._images[key]]
+                if stamps:
+                    nearest = min(stamps, key=lambda stamp: (abs(stamp - target_ns), stamp))
+                    details.append(
+                        f"{key} (nearest={(nearest - target_ns) / 1e6:+.1f} ms, "
+                        f"range=[{(min(stamps) - target_ns) / 1e6:+.1f}, "
+                        f"{(max(stamps) - target_ns) / 1e6:+.1f}] ms)"
+                    )
+                else:
+                    details.append(f"{key} (no images received)")
+            age_ms = (self.get_clock().now().nanoseconds - target_ns) / 1e6
             raise RuntimeError(
                 f"Frame {message.frame_index} has no image within one frame period: "
-                + ", ".join(missing)
+                + ", ".join(details)
+                + f"; target age={age_ms:.1f} ms, waited={waited * 1000:.1f} ms"
             )
         try:
             # Keep references now, before encoder or disk work can age the camera
@@ -279,7 +307,7 @@ class RecordingWorker(Node):
         }
         images = {}
         for key, (stamp, image) in matched.items():
-            images[key] = image_to_numpy(image, depth=(key == DEPTH_KEY))
+            images[key] = image_to_numpy(image, depth=(key == DEPTH_KEY), copy=False)
             timestamps[f"source_timestamp.{key}"] = stamp
         numeric_row = {
             key: getattr(message, field) for key, field in NUMERIC_FIELDS.items()
@@ -428,7 +456,7 @@ class RecordingWorker(Node):
                 self._fail(str(exc))
             operation.result = {**self._status(), "message": str(exc)}
         finally:
-            operation.event.set()
+            operation.completion.set_result(None)
 
     def _run(self):
         try:
@@ -456,7 +484,7 @@ class RecordingWorker(Node):
                 except queue.Empty:
                     break
                 operation.result = {"message": "Dataset writer stopped"}
-                operation.event.set()
+                operation.completion.set_result(None)
 
     def _match_run(self):
         while not self._shutdown.is_set():
@@ -486,7 +514,7 @@ def main(args=None):
     executor = None
     try:
         node = RecordingWorker(options.output)
-        executor = MultiThreadedExecutor(num_threads=4)
+        executor = SingleThreadedExecutor()
         executor.add_node(node)
         executor.spin()
     except KeyboardInterrupt:

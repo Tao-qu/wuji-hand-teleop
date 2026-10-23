@@ -30,6 +30,7 @@ class Session:
         self.episode = settings.start
         self.state = "ready"
         self.owns_candidate = False
+        self.failed_candidate = False
 
     def command(self, command, payload=None):
         from data_collection_interfaces.srv import SessionCommand
@@ -60,6 +61,9 @@ class Session:
             self.owns_candidate = True
         elif response.success and command in ("save", "discard"):
             self.owns_candidate = False
+        if (result.get("state") == "error" and self.owns_candidate
+                and self.state in ("recording", "pending")):
+            self.failed_candidate = True
         if interrupted:
             raise KeyboardInterrupt
         if not response.success:
@@ -81,6 +85,8 @@ class Session:
     def prompt(self):
         choices = {"ready": "x: start", "recording": "x: stop",
                    "pending": "s: save and continue | r: discard and retry | q: save and exit"}
+        if self.state == "pending" and self.failed_candidate:
+            choices["pending"] = "r: discard and retry | Ctrl-C: discard and exit"
         print(f"Episode {self.episode} [{self.state.upper()}] {choices[self.state]}", flush=True)
 
     def stop(self):
@@ -90,6 +96,9 @@ class Session:
         try:
             self.command("stop", {"frame_count": count})
             print(f"Captured {count} frames ({count / 30:.2f} s).", flush=True)
+        except Exception:
+            self.failed_candidate = True
+            raise
         finally:
             self.prompt()
 
@@ -100,6 +109,7 @@ class Session:
             self.command("start", {"episode_index": self.episode, "task": self.settings.task,
                                    "output": self.settings.output})
             self.owns_candidate = True
+            self.failed_candidate = False
             self.node.start_recording()
             self.state = "recording"
             self.prompt()
@@ -108,11 +118,20 @@ class Session:
         elif key == "r" and self.state == "pending":
             self.command("discard")
             self.owns_candidate = False
+            self.failed_candidate = False
             self.state = "ready"
             self.prompt()
         elif key in ("s", "q") and self.state == "pending":
+            if self.failed_candidate:
+                print("This recording failed and cannot be saved. Press r to discard and retry, or Ctrl-C to discard and exit.", flush=True)
+                return False
             print("Saving episode on Jetson...", flush=True)
-            result = self.command("save")
+            try:
+                result = self.command("save")
+            except ValueError:
+                if self.failed_candidate:
+                    self.prompt()
+                raise
             self.owns_candidate = False
             print(f"Saved episode {self.episode}: {result.get('saved_episode', result)}", flush=True)
             if key == "q" or self.episode == self.settings.last_episode:
@@ -132,6 +151,7 @@ class Session:
         if status["state"] == "error":
             self.node.stop_recording()
             self.state = "pending"
+            self.failed_candidate = True
             print(f"Recording error: {status.get('error')}. Press r to discard and retry.", flush=True)
             self.prompt()
         elif error:
