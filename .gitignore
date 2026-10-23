@@ -42,6 +42,7 @@ src/output_devices/wujihand2_output/wujihand2_ros2/config/wujihand2.yaml
 src/output_devices/tianji_output/tianji_output/config/tianji_chest.yaml
 src/input_devices/openvr_input/config/openvr.yaml
 src/camera/camera_bringup/config/cameras.yaml
+src/data_collection/config/recording.yaml
 
 # Local calibration profiles are created from the tracked templates.
 src/input_devices/manus_input/manus_ros2/calibration/*.mcal
@@ -53,6 +54,9 @@ build_camera/
 install_camera/
 log_camera/
 camera_dependencies/
+
+# Local dataset output; the writer defaults to ~/Datasets outside the checkout.
+datasets/
 
 # Temporary files
 *.tmp

@@ -2,7 +2,7 @@
 
 A ROS 2 Humble system for two **Wuji Hand 2.2** hands and two Tianji arms. Two MANUS gloves supply finger motion; five HTC Vive Trackers supply chest, hand-back, and upper-arm poses. Finger retargeting and hand communication use the official `wuji-sdk==2026.10.12`. RViz uses the official Hand 2.2 model.
 
-Jetson camera capture provides four separate GMSL images and D435 color/depth streams. Camera acquisition can run independently of teleoperation. Dataset recording and policy inference are not implemented yet.
+Jetson camera capture provides four separate GMSL images and D435 color/depth streams. Independent data collection saves 30 Hz LeRobot v2.1 episodes with robot actions, measured states, five RGB videos, and lossless depth. Policy inference is not implemented yet.
 
 ## Hardware and modes
 
@@ -49,7 +49,7 @@ Teleoperation uses hand, arm, and OpenVR input configurations, plus three calibr
 | `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal` | Right MANUS calibration |
 | `src/input_devices/openvr_input/calibration/tracker.yaml` | Human chest and palm mounting rotations, measured palm-to-Tracker offsets, and captured neutral poses |
 
-All six runtime files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py --profile teleop` copies only missing files and preserves existing configuration and calibration. Add `--check` to check that these six files exist without writing. The camera profile initializes its own configuration and four intrinsic-calibration files; `configure.py` without a profile processes both sets.
+All six teleoperation files are local and ignored by Git. Each has an adjacent tracked `.template` file, including `LeftMetaglovePro.mcal.template`, `RightMetaglovePro.mcal.template`, and `tracker.yaml.template`. Setup or `python3 tools/configure.py --profile teleop` copies only missing files and preserves existing configuration and calibration. This profile also prepares the independent `src/data_collection/config/recording.yaml`. Add `--check` to check these files without writing. The camera profile initializes its own configuration and four intrinsic-calibration files; `configure.py` without a profile processes both sets.
 
 Templates describe the supplied installation; the `.mcal.template` files are complete binary profiles, not editable text. Check serial numbers, cabinet IP, mounting dimensions, and operator calibration for your hardware before operation. Edit the source configuration files and use the calibration tools to update profiles; the symlink build makes them available to ROS.
 
@@ -160,6 +160,8 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 | `src/wuji_teleop_monitor/` | Qt monitor and brake tool |
 | `src/camera/gmsl_camera/` | Four full-resolution GMSL streams and optional JPEG previews |
 | `src/camera/camera_bringup/` | Jetson camera configuration, initialization, and GMSL/D435 launch |
+| `src/data_collection/` | Desktop recording session and Jetson LeRobot v2.1 dataset writer |
+| `src/data_collection_interfaces/` | Numeric frame and recording session ROS interfaces |
 | `tools/` | Setup, environment, configuration, and dependency tools |
 
 ### Coordinate boundaries
@@ -225,6 +227,24 @@ export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 `tools/camera_env.sh` loads the Jetson camera build; `tools/env.sh` loads the desktop teleoperation build. Deploying cameras does not create `install_camera/` on the desktop.
 
 Keep full-resolution capture and recording on the Jetson: the four GMSL RGB streams alone would require about 14.6 Gbit/s at 30 fps. Desktop viewers can use `/cameras/<role>/preview/compressed`. See [camera topics, configuration, timestamps, and deployment](docs/CAMERAS.md) for details.
+
+## Record demonstrations
+
+Start cameras on the Jetson and full hands + arms teleoperation on the desktop. In a second Jetson terminal, load `tools/camera_env.sh` with the same ROS network settings and start the writer:
+
+```bash
+ros2 run data_collection writer --output ~/Datasets/tianji-wuji2
+```
+
+Set `task` in `src/data_collection/config/recording.yaml`. In a separate desktop terminal:
+
+```bash
+source tools/env.sh
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+ros2 run data_collection record --start 0 --num 10
+```
+
+Press **x** to start and **x** again to stop an episode. While awaiting confirmation, **s** saves and continues, **r** discards and retries the same index, and **q** saves and exits. The recording program does not stop teleoperation or cameras. New datasets start at episode 0; resume at the next saved index. See [recording configuration, fields, and storage](docs/RECORDING.md).
 
 ## Environment checks and documentation
 

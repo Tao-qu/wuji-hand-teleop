@@ -22,4 +22,5 @@ if [[ -f "$_CAMERA_DEP_PREFIX/local_setup.bash" ]]; then
     source "$_CAMERA_DEP_PREFIX/local_setup.bash"
 fi
 source "$_CAMERA_ENV_ROOT/install_camera/local_setup.bash"
+export PYTHONPATH="$_CAMERA_ENV_ROOT/camera_dependencies/python${PYTHONPATH:+:$PYTHONPATH}"
 unset _CAMERA_DEP_PREFIX _CAMERA_ENV_ROOT

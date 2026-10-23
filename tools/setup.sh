@@ -32,7 +32,7 @@ Existing configuration and calibration files are preserved.
 
   --skip-system  Skip apt, rosdep, USB rules, and group changes.
   --skip-build   Prepare dependencies and configuration without building.
-  --profile      teleop (default): desktop robot workspace; camera: Jetson cameras.
+  --profile      teleop (default): desktop robot/recording workspace; camera: Jetson cameras/writer.
   --user-deps    Camera only: use a private ROS dependency prefix without sudo.
 USAGE
             exit 0 ;;
@@ -84,7 +84,7 @@ git lfs pull
 .venv/bin/python -m pip install 'pip>=23,<27' 'setuptools==68.2.2' 'wheel==0.45.1'
 .venv/bin/python -m pip install -r requirements.txt
 
-teleop_sources=(src/input_devices src/output_devices src/controller src/wuji_teleop_bringup src/wuji_teleop_monitor)
+teleop_sources=(src/input_devices src/output_devices src/controller src/wuji_teleop_bringup src/wuji_teleop_monitor src/data_collection src/data_collection_interfaces)
 if ! "$skip_system"; then
     rosdep install --from-paths "${teleop_sources[@]}" --ignore-src --rosdistro humble -y
 fi

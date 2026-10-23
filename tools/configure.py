@@ -12,6 +12,7 @@ TELEOP_TEMPLATES = (
     "src/input_devices/manus_input/manus_ros2/calibration/LeftMetaglovePro.mcal.template",
     "src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal.template",
     "src/input_devices/openvr_input/calibration/tracker.yaml.template",
+    "src/data_collection/config/recording.yaml.template",
 )
 CAMERA_TEMPLATES = (
     "src/camera/camera_bringup/config/cameras.yaml.template",

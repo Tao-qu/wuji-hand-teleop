@@ -42,6 +42,7 @@ transform is invented for either camera family.
 
 - Ubuntu 22.04 and ROS 2 Humble on the Jetson.
 - NVIDIA JetPack 6 / L4T 36.4.x, including `nvarguscamerasrc` and `nvvidconv`.
+  The dataset writer uses the BSP's `nvv4l2h264enc` hardware encoder when available.
 - Tianji's GEAC board support package, device tree, and sensor drivers. The supplied
   initializer is expected at `/home/nvidia/cam_geac/rb_camera.sh`; override its
   directory with `GMSL_VENDOR_DIR` when needed. These board-specific vendor files
@@ -82,7 +83,7 @@ source tools/camera_env.sh
 
 `./tools/setup_camera.sh` is the equivalent camera-only entry point. The script
 installs camera dependencies, creates missing camera configuration from templates,
-and builds only `src/camera` into `build_camera/`, `install_camera/`, and
+and builds `src/camera`, `src/data_collection`, and `src/data_collection_interfaces` into `build_camera/`, `install_camera/`, and
 `log_camera/`. It never starts capture or changes the running camera service.
 Existing local configuration and calibration are preserved.
 
@@ -97,14 +98,22 @@ Options:
 For `--user-deps`, ROS Humble and native build dependencies must already exist:
 
 ```bash
-sudo apt-get install build-essential cmake pkg-config python3-yaml \
+sudo apt-get install build-essential cmake pkg-config python3-yaml python3-numpy python3-pip ffmpeg \
   python3-colcon-common-extensions libgstreamer1.0-dev \
-  libgstreamer-plugins-base1.0-dev libopencv-dev libyaml-cpp-dev
+  libgstreamer-plugins-base1.0-dev libopencv-dev libyaml-cpp-dev \
+  gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
 ./tools/setup_camera.sh --user-deps
 ```
 
-The private dependency prefix is included by `tools/camera_env.sh`.
-This mode downloads only missing ROS packages. Development-only dependencies of
+The private dependency prefix is included by `tools/camera_env.sh`. The dataset
+writer's pinned Arrow wheel is installed under `camera_dependencies/python`; the
+system NumPy/OpenCV installation is preserved. The writer automatically uses
+GStreamer's NVIDIA H.264 encoder when its plugins are available, with FFmpeg
+`libx264` as the software alternative. Standard GStreamer base, good, and bad
+plugins provide raw video parsing, color conversion, H.264 parsing, and MP4
+muxing; NVIDIA plugins come from the Jetson BSP. These dependencies also apply
+to `--skip-system` setups.
+The ROS download step retrieves only missing ROS packages. Development-only dependencies of
 prebuilt ROS packages are reported and skipped; missing native runtime dependencies
 are reported with an apt installation command. The RealSense component's dynamic
 library dependencies are checked before setup completes. Package
@@ -127,8 +136,10 @@ The defaults are `nvidia@6.6.7.100` and
   --path /home/nvidia/Workspace/wuji-hand-teleop --user-deps
 ```
 
-The script uses SSH and rsync to copy `src/camera`, the camera setup, environment, and configuration
-tools, and this document. It then performs the camera-only build remotely. It does
+The script uses SSH and rsync to copy `src/camera`, `src/data_collection`,
+`src/data_collection_interfaces`, the shared recording requirements, setup,
+environment, and configuration tools, and the camera/recording guides. It then
+builds the camera and dataset writer workspace remotely. It does
 not transfer desktop build products, SDKs, credentials, or local camera YAML files.
 Existing destination camera YAML files are preserved; missing files are initialized
 from the transferred templates. System installation through the deployment script
@@ -218,8 +229,8 @@ backend converts each buffer's GStreamer PTS and pipeline base time to Jetson
 system time. If PTS is unavailable, it uses receive time; diagnostics identifies
 which is in use. PTS has not been established as the exact exposure time. There
 is no claim of hardware synchronization between four Argus sources or the D435.
-Independent workers publish frames as they arrive; future recording/observation
-assembly must match timestamps explicitly. RealSense timestamp conversion remains
+Independent workers publish frames as they arrive; the dataset writer aligns
+them by source timestamps on a 30 Hz grid. RealSense timestamp conversion remains
 owned by the official driver.
 
 The default GMSL raw payload alone is approximately 1.83 GB/s (14.6 Gbit/s), before
@@ -228,6 +239,12 @@ full-resolution recording/processing on the Jetson, subscribe to JPEG previews
 from the desktop, and send only policy-sized images for inference. Actual capture
 and storage throughput must be selected for the intended recording mode. System
 clock synchronization does not remove transport delay or align exposures.
+
+Start `ros2 run data_collection writer` in another Jetson terminal after capture
+is running. The desktop's independent `ros2 run data_collection record` controls
+episode start, stop, retry, and save. RGB encoding and lossless depth storage stay
+on the Jetson; only robot numeric samples cross the network. See
+[continuous recording](RECORDING.md) for the complete workflow.
 
 For a local software/device inspection after starting capture:
 

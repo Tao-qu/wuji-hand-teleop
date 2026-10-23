@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build camera packages independently of MANUS, SteamVR, and the robot SDKs.
+# Build cameras and the dataset writer independently of the robot SDKs.
 set -eo pipefail
 CAMERA_SETUP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 skip_system=false
@@ -15,7 +15,7 @@ for option in "$@"; do
 Usage: ./tools/setup_camera.sh [--skip-system] [--skip-build] [--user-deps]
 
 Requires Ubuntu 22.04 / ROS 2 Humble. Capture requires the Tianji Jetson BSP.
-Builds only src/camera into build_camera and install_camera.
+Builds src/camera, data_collection, and data_collection_interfaces into install_camera.
   --skip-system  Use existing native/ROS dependencies; do not run sudo or apt install.
   --skip-build   Initialize configuration and dependencies without compiling.
   --user-deps    Download missing official RealSense ROS packages into a private
@@ -36,10 +36,13 @@ export PYTHONNOUSERSITE=1
 source /opt/ros/humble/setup.bash
 if ! "$skip_system" && ! "$user_deps"; then
     sudo apt-get update
-    sudo apt-get install -y build-essential cmake pkg-config python3-yaml \
+    sudo apt-get install -y build-essential cmake pkg-config python3-yaml python3-numpy \
+        python3-pip ffmpeg \
         python3-colcon-common-extensions libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev libopencv-dev libyaml-cpp-dev \
-        gstreamer1.0-tools ros-humble-realsense2-camera ros-humble-compressed-image-transport
+        gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad ros-humble-realsense2-camera ros-humble-compressed-image-transport \
+        ros-humble-rosidl-default-generators ros-humble-tf2-ros-py
 fi
 if "$user_deps"; then
     /usr/bin/python3 - "$CAMERA_SETUP_ROOT/camera_dependencies" <<'PY'
@@ -54,7 +57,8 @@ cache = root / 'archives'
 prefix = root / 'root'
 cache.mkdir(parents=True, exist_ok=True)
 prefix.mkdir(parents=True, exist_ok=True)
-packages = ['ros-humble-realsense2-camera', 'ros-humble-compressed-image-transport']
+packages = ['ros-humble-realsense2-camera', 'ros-humble-compressed-image-transport',
+            'ros-humble-rosidl-default-generators', 'ros-humble-tf2-ros-py']
 plan = subprocess.check_output(['apt-get', '-s', 'install', *packages], text=True,
                                env={**os.environ, 'LC_ALL': 'C'})
 resolved = []
@@ -96,6 +100,17 @@ PY
 fi
 
 /usr/bin/python3 tools/configure.py --profile camera
+# Keep the Jetson's NumPy/OpenCV pair supplied by Ubuntu. Only the Arrow wheel is
+# installed privately; this does not alter system Python or user site-packages.
+/usr/bin/python3 -m pip install --only-binary=:all: --no-deps --upgrade \
+    --target "$CAMERA_SETUP_ROOT/camera_dependencies/python" \
+    -r "$CAMERA_SETUP_ROOT/requirements-recording.txt"
+export PYTHONPATH="$CAMERA_SETUP_ROOT/camera_dependencies/python${PYTHONPATH:+:$PYTHONPATH}"
+/usr/bin/python3 -c 'import numpy, pyarrow'
+if ! command -v ffmpeg >/dev/null || ! ffmpeg -hide_banner -encoders 2>/dev/null | grep ' libx264 ' >/dev/null; then
+    printf 'Install FFmpeg with the libx264 encoder: sudo apt-get install ffmpeg\n' >&2
+    exit 1
+fi
 if [[ -f "$CAMERA_SETUP_ROOT/camera_dependencies/root/opt/ros/humble/local_setup.bash" ]]; then
     source "$CAMERA_SETUP_ROOT/camera_dependencies/root/opt/ros/humble/local_setup.bash"
 fi
@@ -116,8 +131,9 @@ if "$skip_build"; then
 fi
 /usr/bin/python3 -m colcon --log-base "$CAMERA_SETUP_ROOT/log_camera" build \
     --base-paths "$CAMERA_SETUP_ROOT/src/camera" \
+        "$CAMERA_SETUP_ROOT/src/data_collection" "$CAMERA_SETUP_ROOT/src/data_collection_interfaces" \
     --build-base "$CAMERA_SETUP_ROOT/build_camera" \
     --install-base "$CAMERA_SETUP_ROOT/install_camera" \
     --symlink-install --parallel-workers 2 --event-handlers console_cohesion+ \
     --cmake-args -DBUILD_TESTING=OFF -DPython3_EXECUTABLE=/usr/bin/python3
-printf '\nCamera build complete. On the Jetson: source tools/camera_env.sh. See docs/CAMERAS.md for capture commands.\n'
+printf '\nCamera and dataset writer build complete. On the Jetson: source tools/camera_env.sh. See docs/CAMERAS.md and docs/RECORDING.md.\n'

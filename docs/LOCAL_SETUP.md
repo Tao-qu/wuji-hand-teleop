@@ -27,8 +27,8 @@ Setup performs the following steps:
 
 1. Installs required system packages, MANUS USB rules, and device-access groups.
 2. Fetches Git LFS assets and the official model revision in `dependencies.lock.json`.
-3. Creates missing local hand, arm, and OpenVR input configurations and three calibration files from their templates.
-4. Creates a Python 3.10 `.venv` with system packages available and installs `requirements.txt`.
+3. Creates missing hand, arm, OpenVR, and recording configurations and three calibration files from their templates.
+4. Creates a Python 3.10 `.venv` with system packages available and installs `requirements.txt`, including the shared recording requirements.
 5. Resolves ROS dependencies, builds the workspace with `--symlink-install`, and checks the environment.
 
 Existing local configuration and calibration are preserved. `./tools/setup.sh --skip-system` skips system package, rosdep installation, and USB permission changes; use it when these are already configured. `--skip-build` skips the build and checks that require an installed workspace. `--help` lists the options.
@@ -48,6 +48,7 @@ source tools/env.sh
 python3 -m colcon build --symlink-install \
   --base-paths src/input_devices src/output_devices src/controller \
     src/wuji_teleop_bringup src/wuji_teleop_monitor \
+    src/data_collection src/data_collection_interfaces \
   --cmake-args -DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python3"
 source tools/env.sh
 python3 tools/check_environment.py --mode all
@@ -72,7 +73,7 @@ The six teleoperation configuration and calibration files are local and ignored 
 - `src/input_devices/manus_input/manus_ros2/calibration/RightMetaglovePro.mcal`
 - `src/input_devices/openvr_input/calibration/tracker.yaml`
 
-Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py --profile teleop` copies only missing files, preserving existing configuration and calibration. The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --profile teleop --check` reports missing files among these six runtime files without writing. Use `--profile camera` for camera settings or omit `--profile` to include both sets.
+Each has an adjacent tracked file with `.template` appended to its name. Setup or `python3 tools/configure.py --profile teleop` copies only missing files, preserving existing configuration and calibration. This also creates `src/data_collection/config/recording.yaml` from its template; see [recording configuration](RECORDING.md#configuration-and-arguments). The templates hold the supplied installation's settings and profiles. The `.mcal.template` files are complete binary MANUS profiles, not editable text; use `manus_calibrate` to produce a new runtime profile. Check device serials, network addresses, tool geometry, and calibration for the actual installation. `python3 tools/configure.py --profile teleop --check` reports missing runtime files without writing. Use `--profile camera` for camera settings or omit `--profile` to include both sets.
 
 The source files are the editable configuration for a symlink build. Teleoperation and Home use the default hand and arm configurations; arm teleoperation also uses the OpenVR input configuration. Preview and standalone OpenVR support an explicit `input_config` launch argument. A regular install reads its package-share configuration copies.
 
