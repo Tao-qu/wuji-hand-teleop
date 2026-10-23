@@ -22,7 +22,7 @@ from tf2_msgs.msg import TFMessage
 from data_collection_interfaces.msg import RecordingFrame
 from data_collection_interfaces.srv import SessionCommand
 
-from .imaging import image_from_cdr, image_to_numpy, nearest_image
+from .imaging import image_from_cdr, image_to_numpy, latest_image_at_or_before
 from .configuration import DEFAULT_OUTPUT, validate_output
 from .schema import DEPTH_KEY, FPS, ROBOT_SOURCE_STREAMS
 from .storage import DatasetStore
@@ -250,22 +250,23 @@ class RecordingWorker(Node):
             return False
         message, arrived = self._pending[0]
         target_ns = int(message.timestamp_ns)
-        have_future = all(
+        streams_reached_tick = all(
             buffer and max(item[0] for item in buffer) >= target_ns
             for buffer in self._images.values()
         )
-        waited = time.monotonic() - arrived
-        waiting = waited < 0.5
-        if not have_future and waiting:
-            return False
         matched = {
-            key: nearest_image(buffer, target_ns)
+            key: latest_image_at_or_before(buffer, target_ns)
             for key, buffer in self._images.items()
         }
         missing = [key for key, value in matched.items() if value is None]
+        waiting = time.monotonic() - arrived < 0.5
+        # Frames after the tick can end the arrival wait but are never selected.
+        if waiting and (not streams_reached_tick or missing):
+            return False
         if missing:
             raise RuntimeError(
-                f"Frame {message.frame_index} has no images received: " + ", ".join(missing)
+                f"Frame {message.frame_index} has no image at or before its recording tick: "
+                + ", ".join(missing)
             )
         try:
             # Keep references now, before encoder or disk work can age the camera

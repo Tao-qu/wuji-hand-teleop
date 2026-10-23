@@ -107,8 +107,10 @@ def stamp_nanoseconds(stamp):
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
-def nearest_image(buffer, timestamp_ns):
-    """Select the closest cached source stamp; the earlier image wins a tie."""
-    if not buffer:
-        return None
-    return min(buffer, key=lambda item: (abs(item[0] - timestamp_ns), item[0]))
+def latest_image_at_or_before(buffer, timestamp_ns):
+    """Select the latest cached source stamp that does not exceed the tick."""
+    return max(
+        (item for item in buffer if item[0] <= timestamp_ns),
+        key=lambda item: item[0],
+        default=None,
+    )

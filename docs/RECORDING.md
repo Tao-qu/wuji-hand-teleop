@@ -214,11 +214,13 @@ torque, current, infrared, and point clouds are not recorded.
 
 The desktop samples the latest robot values at or before each 30 Hz tick.
 The writer reads serialized ROS Image buffers without materializing another
-full pixel array. It retains 32 images per stream and selects the cached image
-whose source timestamp is nearest to each tick, without a maximum timestamp
-offset. If a stream has no image at or after the tick yet, the writer allows up
-to 500 ms from the tick's arrival for a newer image to arrive. This is an arrival
-grace period, not a limit on the selected image's timestamp offset.
+full pixel array. It retains 32 images per stream and selects the latest cached
+image whose source timestamp is at or before each tick, without a maximum image
+age. If a stream has not reached the tick or has no eligible image yet, the writer
+allows up to 500 ms from the tick's arrival for more images to arrive. Images after
+the tick can end this wait but are never selected. If a stream still has no image
+at or before the tick when the wait expires, recording reports a missing-image
+error. This is an arrival grace period, not a limit on the selected image's age.
 
 During camera gaps, multiple ticks can reuse a cached image, including across a
 long gap. Each selected image keeps its original `source_timestamp`; reused
