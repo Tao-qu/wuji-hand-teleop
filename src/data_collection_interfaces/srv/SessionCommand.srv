@@ -1,0 +1,6 @@
+# status, start, stop, save, discard. Payloads are recording settings only.
+string command
+string payload_json
+---
+bool success
+string message_json
