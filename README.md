@@ -233,10 +233,10 @@ Keep full-resolution capture and recording on the Jetson: the four GMSL RGB stre
 Start cameras on the Jetson and full hands + arms teleoperation on the desktop. In a second Jetson terminal, load `tools/camera_env.sh` with the same ROS network settings and start the writer:
 
 ```bash
-ros2 run data_collection writer --output ~/Datasets/tianji-wuji2
+ros2 run data_collection writer
 ```
 
-Set `task` in `src/data_collection/config/recording.yaml`. In a separate desktop terminal:
+Set `task` and `output` in the desktop's `src/data_collection/config/recording.yaml`. The output defaults to `~/Datasets/tianji-wuji2` on the Jetson; `~` and relative paths resolve on the Jetson. An explicit writer `--output PATH` overrides the configured path. In a separate desktop terminal:
 
 ```bash
 source tools/env.sh

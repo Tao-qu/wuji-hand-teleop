@@ -72,6 +72,7 @@ class Session:
         status = self.command("status")
         if status["state"] != "idle":
             raise ValueError(f"writer already has a session ({status['state']}); finish it before starting another recorder")
+        status = self.command("configure", {"output": self.settings.output})
         if self.episode != status["next_episode_index"]:
             raise ValueError(f"--start must be {status['next_episode_index']} for this dataset (contiguous LeRobot episode indices)")
         print(f"Dataset on Jetson: {status['output']}\nTask: {self.settings.task}", flush=True)
@@ -96,7 +97,8 @@ class Session:
         """Return True only after a successful save that ends the session."""
         if key == "x" and self.state == "ready":
             self.node.readiness()
-            self.command("start", {"episode_index": self.episode, "task": self.settings.task})
+            self.command("start", {"episode_index": self.episode, "task": self.settings.task,
+                                   "output": self.settings.output})
             self.owns_candidate = True
             self.node.start_recording()
             self.state = "recording"

@@ -1,4 +1,4 @@
-# status, start, stop, save, discard. Payloads are recording settings only.
+# status, configure, start, stop, save, discard. Payloads are recording settings only.
 string command
 string payload_json
 ---

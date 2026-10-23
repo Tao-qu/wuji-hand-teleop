@@ -5,6 +5,15 @@ from pathlib import Path
 
 import yaml
 
+DEFAULT_OUTPUT = "~/Datasets/tianji-wuji2"
+
+
+def validate_output(value):
+    """Keep the path unexpanded: the Jetson writer resolves it on its host."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("output must be a nonempty directory path")
+    return value.strip()
+
 
 def config_path():
     source = Path(__file__).resolve().parents[1]
@@ -20,6 +29,7 @@ class Settings:
     start: int
     end: int | None
     num: int | None
+    output: str = DEFAULT_OUTPUT
 
     @property
     def last_episode(self):
@@ -40,10 +50,11 @@ def parse_settings(args=None, path=None):
             config = yaml.safe_load(stream)
         if not isinstance(config, dict):
             raise ValueError("recording configuration must be a mapping")
-        unknown = set(config) - {"task", "start", "end", "num"}
+        unknown = set(config) - {"task", "start", "end", "num", "output"}
         if unknown:
             raise ValueError(f"unknown recording settings: {', '.join(sorted(unknown))}")
-        values = {"start": 0, "end": None, "num": None, **config}
+        values = {"start": 0, "end": None, "num": None, "output": DEFAULT_OUTPUT, **config}
+        output = validate_output(values["output"])
         for key in ("start", "end", "num"):
             if getattr(options, key) is not None:
                 values[key] = getattr(options, key)
@@ -60,6 +71,6 @@ def parse_settings(args=None, path=None):
             raise ValueError("end must be >= start")
         if values["num"] is not None and values["num"] <= 0:
             raise ValueError("num must be > 0")
-        return Settings(values["task"].strip(), values["start"], values["end"], values["num"])
+        return Settings(values["task"].strip(), values["start"], values["end"], values["num"], output)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         parser.error(str(exc))

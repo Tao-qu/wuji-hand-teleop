@@ -38,12 +38,14 @@ In a second Jetson terminal, start the dataset writer:
 cd ~/Workspace/wuji-hand-teleop
 source tools/camera_env.sh
 export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
-ros2 run data_collection writer --output ~/Datasets/tianji-wuji2
+ros2 run data_collection writer
 ```
 
-`--output` is a directory on the **Jetson**. Its default is
-`~/Datasets/tianji-wuji2`. Keep this process and camera capture running across
-episodes. The writer does not start cameras.
+The desktop recording configuration selects the dataset directory on the
+**Jetson**, defaulting to `~/Datasets/tianji-wuji2`. An explicit writer
+`--output PATH` overrides that setting for the lifetime of the writer. Keep this
+process and camera capture running across episodes. The writer does not start
+cameras.
 
 Start full teleoperation on the desktop:
 
@@ -54,7 +56,8 @@ export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
 ros2 run wuji_teleop_bringup wuji_teleop.launch.py
 ```
 
-Set the task text in `src/data_collection/config/recording.yaml`. Once
+Set the task text and output directory in the desktop's
+`src/data_collection/config/recording.yaml`. Once
 teleoperation is ready, open another desktop terminal:
 
 ```bash
@@ -72,6 +75,7 @@ an existing file:
 
 ```yaml
 task: ""
+output: "~/Datasets/tianji-wuji2"
 start: 0
 end: null
 num: null
@@ -80,6 +84,7 @@ num: null
 | Setting / argument | Meaning | Default |
 | --- | --- | --- |
 | `task` | Task instruction stored with each saved episode; set a nonempty instruction before recording | Empty |
+| `output` | Dataset directory on the Jetson; overridden by an explicit writer `--output PATH` | `~/Datasets/tianji-wuji2` |
 | `start` / `--start N` | First episode index, starting at zero | `0` |
 | `end` / `--end N` | Last episode index, inclusive | `null`, unlimited |
 | `num` / `--num N` | Number of episodes to save | `null`, unlimited |
@@ -89,6 +94,14 @@ CLI values override the corresponding configuration values. The effective
 `end` and `num` cannot both be set. `start` must be nonnegative, `end` must be at
 least `start`, and `num` must be positive. Without `end` or `num`, recording
 continues until an episode is saved with **q**.
+
+At session startup, the desktop sends `output` to the Jetson writer and displays
+the selected absolute directory before recording. `~` expands to the Jetson
+writer user's home; relative paths resolve against the writer's working
+directory. A running writer can switch datasets between sessions while idle.
+If the writer was started with `--output PATH`, that path takes precedence over
+the desktop configuration. Existing local configuration files without `output`
+use the default above.
 
 LeRobot episodes are contiguous: a new dataset starts at 0. If episodes 0–19
 already exist, resume with `--start 20`. Existing episodes are not overwritten.

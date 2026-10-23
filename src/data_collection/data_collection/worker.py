@@ -22,6 +22,7 @@ from data_collection_interfaces.msg import RecordingFrame
 from data_collection_interfaces.srv import SessionCommand
 
 from .imaging import image_to_numpy, nearest_image, stamp_nanoseconds
+from .configuration import DEFAULT_OUTPUT, validate_output
 from .schema import DEPTH_KEY, FPS, ROBOT_SOURCE_STREAMS
 from .storage import DatasetStore
 
@@ -55,9 +56,12 @@ class Request:
 class RecordingWorker(Node):
     """Own dataset files while keeping image and ROS callbacks off the disk thread."""
 
-    def __init__(self, output):
+    def __init__(self, output=None):
         super().__init__("writer", namespace="data_collection")
-        self._output = Path(output).expanduser().resolve()
+        self._output_override = (
+            Path(validate_output(output)).expanduser().resolve() if output is not None else None
+        )
+        self._output = self._output_override or Path(DEFAULT_OUTPUT).expanduser().resolve()
         self._store = DatasetStore(self._output, fps=FPS)
         self._lock = threading.RLock()
         self._state = "idle"
@@ -186,7 +190,7 @@ class RecordingWorker(Node):
                 response.success = True
                 response.message_json = json.dumps(self._status())
                 return response
-            if request.command not in ("start", "stop", "save", "discard"):
+            if request.command not in ("configure", "start", "stop", "save", "discard"):
                 raise ValueError(f"Unknown recording command: {request.command}")
             operation = Request(request.command, payload)
             self._requests.put_nowait(operation)
@@ -286,10 +290,38 @@ class RecordingWorker(Node):
             self._written_count += 1
         return True
 
+    def _resolve_output(self, value):
+        output = validate_output(value)
+        return self._output_override or Path(output).expanduser().resolve()
+
+    def _configure(self, payload):
+        with self._lock:
+            if self._state != "idle":
+                raise ValueError("Select a dataset before starting an episode")
+        output = self._resolve_output(payload["output"])
+        if output == self._output:
+            return
+        # Open the selected dataset before releasing the previous idle store.
+        store = DatasetStore(output, fps=FPS)
+        try:
+            self._store.close()
+        except Exception:
+            store.close()
+            raise
+        self._clear_frames()
+        with self._lock:
+            self._store = store
+            self._output = output
+            self._next_index = store.next_episode_index
+            self._written_count = self._received_count = 0
+            self._error = ""
+
     def _start(self, payload):
         with self._lock:
             if self._state != "idle":
                 raise ValueError(f"Cannot start an episode while writer is {self._state}")
+        if self._resolve_output(payload.get("output", str(self._output))) != self._output:
+            raise ValueError("The writer dataset changed; restart the recording client")
         if not self._status()["cameras_ready"]:
             raise RuntimeError("All six image and CameraInfo streams are required before recording starts")
         index = int(payload["episode_index"])
@@ -377,7 +409,9 @@ class RecordingWorker(Node):
     def _execute(self, operation):
         try:
             extra = None
-            if operation.command == "start":
+            if operation.command == "configure":
+                self._configure(operation.payload)
+            elif operation.command == "start":
                 self._start(operation.payload)
             elif operation.command == "stop":
                 self._stop(operation.payload)
@@ -390,7 +424,7 @@ class RecordingWorker(Node):
             if extra is not None:
                 operation.result["saved_episode"] = extra
         except Exception as exc:
-            if self._state in ("recording", "stopping", "saving"):
+            if operation.command != "configure" and self._state in ("recording", "stopping", "saving"):
                 self._fail(str(exc))
             operation.result = {**self._status(), "message": str(exc)}
         finally:
@@ -444,8 +478,8 @@ class RecordingWorker(Node):
 
 def main(args=None):
     parser = argparse.ArgumentParser(description="Store LeRobot episodes beside the Jetson cameras")
-    parser.add_argument("--output", default="~/Datasets/tianji-wuji2",
-                        help="Dataset directory on this machine (default: %(default)s)")
+    parser.add_argument("--output", default=None,
+                        help="Override the desktop recording.yaml output; paths resolve on this machine")
     options = parser.parse_args(remove_ros_args(args=args)[1:])
     rclpy.init(args=args)
     node = None
