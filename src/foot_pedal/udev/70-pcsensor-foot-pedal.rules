@@ -1,0 +1,2 @@
+# Desktop active-session access only, limited to this device's keyboard interface.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{idVendor}=="3553", ATTRS{idProduct}=="b001", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess", SYMLINK+="input/pcsensor-foot-pedal"

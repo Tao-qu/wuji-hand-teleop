@@ -28,7 +28,7 @@ cd wuji-hand-teleop
 ./tools/setup.sh
 ```
 
-Setup fetches Git LFS assets and the pinned official model, creates `.venv`, installs Python and ROS dependencies, prepares local configuration, builds the desktop robot packages with `--symlink-install`, and checks the environment. It installs required system packages and MANUS USB access rules through `sudo`. Running it again preserves existing local configuration. Use `--skip-system` when system dependencies and USB permissions are already managed, or `--skip-build` to prepare dependencies without building. For the separate Jetson camera workspace, use `./tools/setup.sh --profile camera`; see [camera deployment](docs/CAMERAS.md).
+Setup fetches Git LFS assets and the pinned official model, creates `.venv`, installs Python and ROS dependencies, prepares local configuration, builds the desktop robot and foot pedal packages with `--symlink-install`, and checks the environment. It installs required system packages and MANUS/PCsensor foot pedal USB access rules through `sudo`. Reconnect the receivers and pedal after setup. Running it again preserves existing local configuration. Use `--skip-system` when system dependencies and USB permissions are already managed, or `--skip-build` to prepare dependencies without building. For the separate Jetson camera workspace, use `./tools/setup.sh --profile camera`; see [camera deployment](docs/CAMERAS.md).
 
 Load the environment in every terminal used for this project:
 
@@ -97,6 +97,21 @@ ros2 service call /tianji_arm/set_enabled std_srvs/srv/SetBool '{data: false}'
 
 Hand service responses acknowledge queued SDK operations. Check lifecycle and diagnostics for their results. The monitor expects the `/left_hand` and `/right_hand` namespaces.
 
+### USB foot pedal
+
+The desktop setup includes the independent PCsensor foot pedal node:
+
+```bash
+source tools/env.sh
+ros2 run foot_pedal pedal
+```
+
+It publishes left, middle, and right pedal press/release and short/long-press
+events on `/foot_pedal/events`, with connection status on `/foot_pedal/status`.
+It currently runs separately from teleoperation and recording. See the
+[foot pedal guide](src/foot_pedal/README.md) for USB access, parameters, and event
+semantics.
+
 ### Return to Home
 
 Stop the current session, select the desired mode, and click **Return Home**. No gloves or Trackers are required. **Stop Home** interrupts the operation; **Start Teleop** starts input following again.
@@ -152,6 +167,7 @@ Finger retargeting receives a `(21, 3)` array in metres in MediaPipe landmark or
 | --- | --- |
 | `src/input_devices/manus_input/` | MANUS publisher, messages, and calibration |
 | `src/input_devices/openvr_input/` | Five-Tracker acquisition, calibration, and TF |
+| `src/foot_pedal/` | Independent PCsensor USB pedal events and device access rules |
 | `src/controller/` | MANUS keypoint conversion, hand retargeting, human-to-robot arm mapping, and arm IK |
 | `src/output_devices/wujihand2_output/wujihand2_ros2/` | Hand SDK adapter, retargeting, and configuration |
 | `src/output_devices/wujihand2_output/wuji-description/hand2/hand2_2/body/` | Pinned official Hand 2.2 model |

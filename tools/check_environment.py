@@ -61,6 +61,8 @@ def main():
     args = parser.parse_args()
     errors = []
     modules = ["rclpy", "yaml", "numpy", "scipy", "PyQt5.QtWidgets"]
+    if args.mode == "all":
+        modules += ["evdev", "foot_pedal.node"]
     if args.mode != "arms":
         modules += ["wuji_sdk", "wujihand2_ros2"]
     if args.mode != "hands":

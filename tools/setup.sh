@@ -26,8 +26,8 @@ Usage: ./tools/setup.sh [--profile teleop|camera] [--skip-system] [--skip-build]
                         [--user-deps]
 
 Install project dependencies, fetch SDK/model assets, create missing local
-configuration and calibration files, build the ROS workspace, and check the
-installed environment.
+configuration and calibration files, configure MANUS and foot pedal USB access,
+build the ROS workspace, and check the installed environment.
 Existing configuration and calibration files are preserved.
 
   --skip-system  Skip apt, rosdep, USB rules, and group changes.
@@ -72,6 +72,8 @@ if ! "$skip_system"; then
     rosdep update --rosdistro humble
     sudo install -m 644 src/input_devices/manus_input/config/udev/99-manus-libusb.rules \
         /etc/udev/rules.d/99-manus-libusb.rules
+    sudo install -m 644 src/foot_pedal/udev/70-pcsensor-foot-pedal.rules \
+        /etc/udev/rules.d/70-pcsensor-foot-pedal.rules
     sudo usermod -aG plugdev,dialout "$(id -un)"
     sudo udevadm control --reload-rules
 fi
@@ -84,7 +86,7 @@ git lfs pull
 .venv/bin/python -m pip install 'pip>=23,<27' 'setuptools==68.2.2' 'wheel==0.45.1'
 .venv/bin/python -m pip install -r requirements.txt
 
-teleop_sources=(src/input_devices src/output_devices src/controller src/wuji_teleop_bringup src/wuji_teleop_monitor src/data_collection src/data_collection_interfaces)
+teleop_sources=(src/input_devices src/output_devices src/controller src/wuji_teleop_bringup src/wuji_teleop_monitor src/foot_pedal src/data_collection src/data_collection_interfaces)
 if ! "$skip_system"; then
     rosdep install --from-paths "${teleop_sources[@]}" --ignore-src --rosdistro humble -y
 fi
@@ -106,5 +108,5 @@ source tools/env.sh
 python3 tools/check_environment.py --mode all
 printf '\nReady. Review the two device YAMLs, then source tools/env.sh in each terminal.\n'
 if ! "$skip_system"; then
-    printf 'Reconnect the MANUS receivers. Log in again if device group membership changed.\n'
+    printf 'Reconnect the MANUS receivers and USB foot pedal. Log in again if device group membership changed.\n'
 fi

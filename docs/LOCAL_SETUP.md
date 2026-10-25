@@ -10,6 +10,7 @@ Prepare device requirements separately:
 
 - MANUS gloves and receivers with vendor SDK licensing. Setup installs the repository's USB rules and adds the current user to `plugdev` and `dialout`.
 - Steam and SteamVR in the same user's graphical session, with five paired Trackers and Lighthouse base stations. See [SteamVR and Tracker setup](STEAMVR.md). Hands-only operation does not use SteamVR.
+- A PCsensor USB foot pedal (`3553:b001`) for standalone pedal events. Setup installs its access rule for the active local desktop user; the pedal need not be connected during setup.
 - Network access to both Wuji hands for SDK discovery and to the configured Tianji cabinet endpoint.
 - Internet access for Git LFS, the pinned model, Python packages, and ROS dependencies. System installation requires `sudo`.
 
@@ -25,15 +26,15 @@ Run this command from the repository root:
 
 Setup performs the following steps:
 
-1. Installs required system packages, MANUS USB rules, and device-access groups.
+1. Installs required system packages, MANUS and PCsensor foot pedal USB rules, and device-access groups.
 2. Fetches Git LFS assets and the official model revision in `dependencies.lock.json`.
 3. Creates missing hand, arm, OpenVR, and recording configurations and three calibration files from their templates.
-4. Creates a Python 3.10 `.venv` with system packages available and installs `requirements.txt`, including the shared recording requirements.
-5. Resolves ROS dependencies, builds the workspace with `--symlink-install`, and checks the environment.
+4. Creates a Python 3.10 `.venv` with system packages available and installs `requirements.txt`, including `evdev==1.9.3` for the pedal and the shared recording requirements.
+5. Resolves ROS dependencies, builds the workspace including `foot_pedal` with `--symlink-install`, and checks the environment.
 
 Existing local configuration and calibration are preserved. `./tools/setup.sh --skip-system` skips system package, rosdep installation, and USB permission changes; use it when these are already configured. `--skip-build` skips the build and checks that require an installed workspace. `--help` lists the options.
 
-After a device-group change, log out and back in, then reconnect the receivers. Load the project environment in each terminal:
+After a device-group change, log out and back in. Reconnect the MANUS receivers and foot pedal after USB rules are installed. The pedal rule creates `/dev/input/pcsensor-foot-pedal` and grants access through the active local desktop session; it does not grant general keyboard access. Load the project environment in each terminal:
 
 ```bash
 source tools/env.sh
@@ -47,7 +48,7 @@ For a source-only rebuild after setup:
 source tools/env.sh
 python3 -m colcon build --symlink-install \
   --base-paths src/input_devices src/output_devices src/controller \
-    src/wuji_teleop_bringup src/wuji_teleop_monitor \
+    src/wuji_teleop_bringup src/wuji_teleop_monitor src/foot_pedal \
     src/data_collection src/data_collection_interfaces \
   --cmake-args -DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python3"
 source tools/env.sh
@@ -170,7 +171,7 @@ python3 tools/check_environment.py --mode all
 ros2 run wuji_teleop_monitor monitor
 ```
 
-The checker verifies configuration and calibration files, imports dependencies, checks pinned versions and native libraries, and constructs retargeting sessions without connecting to devices. `--mode hands` or `--mode arms` narrows device-specific checks. See the [project README](../README.md#start-teleoperation) for teleoperation, Home, Preview, and services.
+The checker verifies configuration and calibration files, imports dependencies, checks pinned versions and native libraries, and constructs retargeting sessions without connecting to devices. The default `--mode all` also imports the foot pedal node and `evdev`; it does not open or capture input devices. `--mode hands` or `--mode arms` narrows device-specific checks. See the [project README](../README.md#start-teleoperation) for teleoperation, Home, Preview, and services, and the [foot pedal guide](../src/foot_pedal/README.md) for standalone input events.
 
 ## Troubleshooting
 

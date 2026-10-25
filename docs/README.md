@@ -6,6 +6,7 @@
 - [MANUS calibration](../src/input_devices/manus_input/manus_ros2/CALIBRATION_GUIDE.md)
 - [SteamVR, five Trackers, and neutral-pose calibration](STEAMVR.md)
 - [Tracker wearing guide](tracker-wearing-guide.md)
+- [PCsensor USB foot pedal setup and events](../src/foot_pedal/README.md)
 - [Wuji Hand 2.2 ROS adapter](../src/output_devices/wujihand2_output/README.md)
 - [Jetson camera streams, configuration, and deployment](CAMERAS.md)
 - [Continuous recording and LeRobot v2.1 datasets](RECORDING.md)
